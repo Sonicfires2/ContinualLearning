@@ -1,0 +1,13 @@
+numpy
+pandas
+torch>=1.12.0
+torchvision
+scikit-learn
+matplotlib
+seaborn
+jupyter
+tqdm
+tensorboard
+hydra-core
+scipy
+pytest
