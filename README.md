@@ -1,14 +1,15 @@
-# Continual Learning Research Project
+# Spaced-Replay Continual Finetuning
 
 ## Research Goal
-Develop and evaluate continual learning methods for neural networks that reduce catastrophic forgetting while allowing efficient adaptation to new tasks.
+Develop and evaluate spacing-inspired replay policies that reduce catastrophic forgetting during continual finetuning under limited memory and compute.
 
 ## Research Question
-How can we design training protocols and model components that enable stable knowledge retention across sequential tasks while maintaining strong performance on new tasks?
+Can sample-level forgetting signals, such as uncertainty, loss history, gradient norms, and representation drift, predict when examples should be replayed better than random or fixed replay schedules?
 
 ## Data Needed
-- Standard image classification datasets for continual learning benchmarks (e.g., CIFAR-10, CIFAR-100, MNIST, PermutedMNIST)
-- Optionally: domain-specific datasets if extending to other modalities (text, audio)
+- Split CIFAR-100 for the primary continual vision benchmark.
+- Split CUB for a harder fine-grained vision benchmark.
+- Optional: sentiment/domain adaptation datasets for DistilBERT experiments if time permits.
 
 ## Folder Structure
 - `data/`: raw and processed datasets, dataset download scripts
@@ -21,11 +22,14 @@ How can we design training protocols and model components that enable stable kno
 - `docs/`: documentation and notes
 
 ## Step-by-step Plan
-1. Prepare datasets and data loaders for sequential tasks
-2. Implement baseline continual learning methods (fine-tune, replay, EWC)
-3. Implement proposed method(s) and training protocol
-4. Run experiments on benchmarks and collect metrics (accuracy, forgetting)
-5. Analyze results and iterate on model/hyperparameters
+1. Prepare sequential Split CIFAR-100 and Split CUB data loaders.
+2. Implement continual finetuning baselines: fine-tuning, experience replay, MIR, ESMER, and uncertainty-based replay.
+3. Log sample-level forgetting signals: loss trajectories, uncertainty, gradient norms, and representation drift.
+4. Implement the spaced-replay scheduler and buffer management policy.
+5. Report final accuracy, average forgetting, training cost, buffer utilization, predictor precision-recall AUC, and scheduler ablations.
+
+## Windows Support
+This repository supports a Windows-only workflow. Use Windows PowerShell with Python 3.14 or newer available on `PATH`; CUDA is optional, and the code should fall back to CPU when no GPU backend is available. The original proposal mentions Apple Metal/MPS hardware, but this implementation is intended to run on Windows as well.
 
 ## Quick setup
 Use the included env setup scripts to create a virtual environment and install dependencies.
