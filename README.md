@@ -49,3 +49,4 @@ Files of interest:
 - [setup_env.ps1](setup_env.ps1)
 - [setup_env.sh](setup_env.sh)
 - [src/main.py](src/main.py)
+- [docs/ACTION_PLAN.md](docs/ACTION_PLAN.md)
