@@ -1,0 +1,27 @@
+gradient_signal_diagnostic:
+  protocol_id: core_split_cifar100_v2
+  method_name: gradient_signal_diagnostic
+  run_name: gradient_signal_diagnostic_split_cifar100_seed0_random_replay
+  output_root: experiments/runs/gradient_signal_diagnostic
+  overwrite: true
+  smoke: false
+  data_root: data
+  download: false
+  task_count: 10
+  classes_per_task: 10
+  split_seed: 0
+  seed: 0
+  replay_seed: 0
+  epochs_per_task: 1
+  batch_size: 32
+  eval_batch_size: 128
+  learning_rate: 0.01
+  device: auto
+  hidden_dims: [256]
+  dropout: 0.0
+  target_key: original_class_id
+  replay_capacity: 2000
+  replay_batch_size: 32
+  replay_insertion_policy: reservoir_task_end
+  log_signals: true
+  log_gradient_signals: true

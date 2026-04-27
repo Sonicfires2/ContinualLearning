@@ -10,9 +10,13 @@ pytest-cache-files-*/
 
 data/raw/
 data/processed/
-models/
-runs/
-outputs/
-multirun/
+data/cifar-100-python/
+data/cifar-100-python.tar.gz
+/models/
+/runs/
+/outputs/
+/multirun/
+experiments/runs/
+experiments/*/
 experiments/**/logs/
 experiments/**/checkpoints/

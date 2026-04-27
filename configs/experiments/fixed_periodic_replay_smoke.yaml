@@ -1,0 +1,29 @@
+fixed_periodic_replay_baseline:
+  protocol_id: core_split_cifar100_v2
+  method_name: fixed_periodic_replay
+  run_name: fixed_periodic_replay_smoke
+  seed: 0
+  output_root: .tmp/baseline_runs
+  overwrite: true
+  smoke: true
+  data_root: data
+  download: false
+  task_count: 3
+  classes_per_task: 2
+  split_seed: 0
+  epochs_per_task: 3
+  batch_size: 8
+  eval_batch_size: 16
+  learning_rate: 0.2
+  device: cpu
+  hidden_dims:
+    - 32
+  dropout: 0.0
+  target_key: original_class_id
+  log_signals: true
+  replay_capacity: 12
+  replay_batch_size: 4
+  replay_seed: 0
+  replay_insertion_policy: reservoir_task_end
+  replay_interval: 2
+  budget_mode: interval_ablation

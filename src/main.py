@@ -2,6 +2,11 @@
 import argparse
 from pathlib import Path
 
+try:
+    from src.research_protocol import load_research_protocol, summarize_research_protocol
+except ModuleNotFoundError:  # pragma: no cover - supports `python src/main.py`
+    from research_protocol import load_research_protocol, summarize_research_protocol
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Continual Learning runner")
@@ -14,7 +19,9 @@ def main():
     print("Continual Learning project skeleton")
     if args.config:
         cfg_path = Path(args.config)
-        print(f"Would load config from: {cfg_path}")
+        protocol = load_research_protocol(cfg_path)
+        print(f"Loaded config from: {cfg_path}")
+        print(summarize_research_protocol(protocol))
 
 
 if __name__ == "__main__":

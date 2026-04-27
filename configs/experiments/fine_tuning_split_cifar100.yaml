@@ -1,0 +1,23 @@
+fine_tuning_baseline:
+  protocol_id: core_split_cifar100_v2
+  method_name: fine_tuning
+  run_name: fine_tuning_split_cifar100_seed0
+  seed: 0
+  output_root: experiments/runs
+  overwrite: false
+  smoke: false
+  data_root: data
+  download: false
+  task_count: 10
+  classes_per_task: 10
+  split_seed: 0
+  epochs_per_task: 1
+  batch_size: 32
+  eval_batch_size: 128
+  learning_rate: 0.01
+  device: auto
+  hidden_dims:
+    - 256
+  dropout: 0.0
+  target_key: original_class_id
+  log_signals: true

@@ -1,0 +1,32 @@
+learned_risk_gated_replay_baseline:
+  protocol_id: core_split_cifar100_v2
+  method_name: learned_risk_gated_replay
+  run_name: learned_risk_gated_replay_smoke
+  output_root: .tmp/baseline_runs/learned_risk_gated_replay
+  overwrite: true
+  smoke: true
+  data_root: data
+  download: false
+  task_count: 3
+  classes_per_task: 2
+  split_seed: 0
+  seed: 0
+  replay_seed: 0
+  epochs_per_task: 3
+  batch_size: 8
+  eval_batch_size: 16
+  learning_rate: 0.2
+  device: cpu
+  hidden_dims: [32]
+  dropout: 0.0
+  target_key: original_class_id
+  replay_capacity: 12
+  replay_batch_size: 4
+  replay_insertion_policy: reservoir_task_end
+  min_replay_interval_steps: 1
+  max_replay_interval_steps: 8
+  risk_threshold: 0.9998
+  scheduler_budget_mode: risk_only
+  learned_predictor_feature_group: all_features
+  learned_predictor_train_anchor_task_max:
+  log_signals: true

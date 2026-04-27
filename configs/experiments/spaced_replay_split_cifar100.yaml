@@ -1,0 +1,35 @@
+spaced_replay_baseline:
+  protocol_id: core_split_cifar100_v2
+  method_name: spaced_replay
+  run_name: spaced_replay_split_cifar100_seed0
+  seed: 0
+  output_root: experiments/runs
+  overwrite: false
+  smoke: false
+  data_root: data
+  download: false
+  task_count: 10
+  classes_per_task: 10
+  split_seed: 0
+  epochs_per_task: 1
+  batch_size: 32
+  eval_batch_size: 128
+  learning_rate: 0.01
+  device: auto
+  hidden_dims:
+    - 256
+  dropout: 0.0
+  target_key: original_class_id
+  log_signals: true
+  replay_capacity: 2000
+  replay_batch_size: 32
+  replay_seed: 0
+  replay_insertion_policy: reservoir_task_end
+  min_replay_interval_steps: 1
+  max_replay_interval_steps: 64
+  scheduler_loss_scale: 5.0
+  scheduler_loss_weight: 1.0
+  scheduler_uncertainty_weight: 1.0
+  scheduler_target_probability_weight: 1.0
+  scheduler_loss_increase_weight: 0.5
+  scheduler_budget_mode: match_random_replay

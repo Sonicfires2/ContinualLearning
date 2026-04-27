@@ -1,0 +1,10 @@
+dataset:
+  name: split_cifar100
+  data_root: data
+  download: false
+  task_count: 10
+  classes_per_task: 10
+  split_seed: 0
+  sample_id_offsets:
+    train: 0
+    test: 1000000

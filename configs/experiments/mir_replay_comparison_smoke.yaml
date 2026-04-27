@@ -1,0 +1,30 @@
+mir_replay_comparison:
+  protocol_id: core_split_cifar100_v2
+  comparison_name: task14_mir_replay_comparison_smoke
+  output_root: .tmp/mir_replay_comparison
+  overwrite: true
+  smoke: true
+  seeds:
+    - 0
+    - 1
+  reference_summary_path: null
+  data_root: data
+  download: false
+  task_count: 3
+  classes_per_task: 2
+  split_seed: 0
+  epochs_per_task: 3
+  batch_size: 8
+  eval_batch_size: 16
+  learning_rate: 0.2
+  device: cpu
+  hidden_dims:
+    - 32
+  dropout: 0.0
+  target_key: original_class_id
+  log_signals: true
+  replay_capacity: 12
+  replay_batch_size: 4
+  replay_insertion_policy: reservoir_task_end
+  mir_candidate_size: 8
+  mir_virtual_lr: 0.2

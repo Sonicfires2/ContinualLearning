@@ -1,0 +1,35 @@
+learned_hybrid_replay:
+  protocol_id: core_split_cifar100_v2
+  method_name: learned_hybrid_replay
+  run_name: task22_class_balanced_only_seed0_prior_random
+  output_root: experiments/runs/task22_rescue_ablation
+  overwrite: true
+  smoke: false
+  data_root: data
+  download: false
+  task_count: 10
+  classes_per_task: 10
+  split_seed: 0
+  seed: 0
+  replay_seed: 0
+  epochs_per_task: 1
+  batch_size: 32
+  eval_batch_size: 128
+  learning_rate: 0.01
+  device: auto
+  hidden_dims: [256]
+  dropout: 0.0
+  target_key: original_class_id
+  replay_capacity: 2000
+  replay_batch_size: 32
+  replay_insertion_policy: reservoir_task_end
+  min_replay_interval_steps: 1
+  max_replay_interval_steps: 64
+  scheduler_budget_mode: risk_ranked
+  learned_risk_fraction: 0.0
+  hybrid_diversity_mode: class_balanced
+  learned_predictor_signal_path: experiments/runs/random_replay/random_replay_split_cifar100_seed0_signals/sample_signals.json
+  learned_predictor_label_path: experiments/runs/random_replay/random_replay_split_cifar100_seed0_signals/forgetting_labels.json
+  learned_predictor_feature_group: all_features
+  learned_predictor_train_anchor_task_max:
+  log_signals: true

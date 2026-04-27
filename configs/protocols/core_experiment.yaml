@@ -1,0 +1,86 @@
+metadata:
+  protocol_id: core_split_cifar100_v2
+  version: 2
+  status: locked
+  locked_on: 2026-04-24
+  owner: repository
+  rationale: >
+    Lock the strongest core experiment before broader benchmarks, heavier signals,
+    or stronger baselines expand the study. Version 2 aligns the protocol with
+    the proposal's explicit requirement to estimate sample-specific forgetting
+    time T_i and compare against fixed-periodic replay.
+
+research:
+  goal: >
+    Develop and evaluate spacing-inspired replay policies that reduce catastrophic
+    forgetting during continual fine-tuning under limited memory and compute.
+  question: >
+    Can sample-level forgetting signals, such as uncertainty, loss history,
+    gradient norms, and representation drift, predict when examples should be
+    replayed better than random or fixed replay schedules?
+
+scope:
+  required_benchmark: split_cifar100
+  task_count: 10
+  classes_per_task: 10
+  required_methods:
+    - fine_tuning
+    - random_replay
+    - fixed_periodic_replay
+    - spaced_replay
+  recommended_methods:
+    - mir
+  stretch_methods:
+    - uncertainty_guided_replay
+    - esmer
+  required_signals:
+    - loss_history
+    - predictive_uncertainty
+  optional_signals:
+    - gradient_norm
+    - representation_drift
+  required_telemetry:
+    - replay_count
+    - last_replay_step
+    - estimated_forgetting_time
+    - next_scheduled_replay_step
+    - scheduler_selection_reason
+  optional_benchmarks:
+    - split_cub
+    - distilbert_domain_adaptation
+
+evaluation:
+  fixed_controls:
+    - identical_task_order
+    - identical_model_architecture
+    - identical_optimizer_settings
+    - identical_replay_buffer_capacity
+    - identical_replay_batch_size
+    - identical_training_epochs_per_task
+  required_metrics:
+    - final_accuracy
+    - average_forgetting
+  recommended_metrics:
+    - average_accuracy
+    - training_time_seconds
+    - replay_utilization
+    - predictor_pr_auc
+    - time_to_forgetting_prediction_error
+  required_artifacts:
+    - accuracy_matrix
+    - run_config
+    - seed_list
+    - method_description
+    - scheduler_trace
+  evaluation_schedule: evaluate_all_seen_tasks_after_each_task
+
+scope_guards:
+  out_of_core_scope:
+    - multi_benchmark_claims_before_split_cifar100_is_stable
+    - llm_first_framing_without_vision_core_results
+    - expensive_signal_logging_before_loss_and_uncertainty_are_working
+    - stretch_baselines_that_delay_core_comparison
+  promotion_rule: >
+    Any change to the required benchmark, required methods, required metrics,
+    or fixed controls must create a new protocol version and a matching
+    progress-log entry.

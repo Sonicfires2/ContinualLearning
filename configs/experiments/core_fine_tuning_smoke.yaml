@@ -1,0 +1,25 @@
+experiment:
+  protocol_id: core_split_cifar100_v2
+  method_name: fine_tuning
+  seed: 0
+  run_name: core_fine_tuning_smoke
+  dataset:
+    name: split_cifar100
+    config_path: configs/datasets/split_cifar100.yaml
+  model:
+    name: unset
+    note: model factory will be selected before baseline runs
+  trainer:
+    epochs_per_task: 1
+    batch_size: 32
+    eval_batch_size: 128
+    device: auto
+  evaluation:
+    schedule: evaluate_all_seen_tasks_after_each_task
+    metrics:
+      - final_accuracy
+      - average_forgetting
+      - average_accuracy
+  artifacts:
+    output_root: experiments/runs
+    schema_version: 1
