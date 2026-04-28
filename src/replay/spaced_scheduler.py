@@ -170,6 +170,17 @@ class SpacedReplayScheduler:
     def state_for(self, sample_id: int) -> ReplayScheduleState | None:
         return self._states.get(int(sample_id))
 
+    def score_items(self, items: Iterable[ReplayItem]) -> dict[int, float]:
+        """Return current risk scores for replay items without selecting them."""
+
+        item_list = list(items)
+        for item in item_list:
+            self._ensure_state_for_item(item)
+        return {
+            item.sample_id: self._states[item.sample_id].risk_score
+            for item in item_list
+        }
+
     def observe_batch(
         self,
         *,

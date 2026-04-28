@@ -16,6 +16,24 @@ MIR_TRACE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
+class MIRCandidateScore:
+    """One candidate memory sample and its MIR interference score."""
+
+    global_step: int
+    optimizer_step: int
+    sample_id: int
+    source_task_id: int
+    original_class_id: int
+    replay_count_before_selection: int
+    last_replay_step_before_selection: int | None
+    pre_update_loss: float
+    post_update_loss: float
+    interference_score: float
+    candidate_rank: int
+    candidate_count: int
+
+
+@dataclass(frozen=True)
 class MIRSelection:
     """One selected memory sample and its interference score."""
 
@@ -101,21 +119,18 @@ def _restore_parameters(
             parameter.copy_(value)
 
 
-def select_mir_replay_items(
+def score_mir_replay_candidates(
     *,
     model: nn.Module,
     current_x: torch.Tensor,
     current_y: torch.Tensor,
     candidate_items: Sequence[ReplayItem],
-    replay_batch_size: int,
     virtual_lr: float,
     global_step: int,
     device: torch.device,
-) -> list[MIRSelection]:
-    """Select the most interfered replay items using ER-MIR's MI-1 score."""
+) -> list[MIRCandidateScore]:
+    """Score all candidate items using ER-MIR's MI-1 virtual-update score."""
 
-    if replay_batch_size < 1:
-        raise ValueError("replay_batch_size must be positive")
     if virtual_lr <= 0:
         raise ValueError("virtual_lr must be positive")
     if not candidate_items:
@@ -151,16 +166,15 @@ def select_mir_replay_items(
         model.train(was_training)
 
     scores = post_losses - pre_losses
-    selected_count = min(replay_batch_size, len(candidate_items))
     order = torch.argsort(scores, descending=True).detach().cpu().tolist()
-    selections: list[MIRSelection] = []
-    for rank, candidate_index in enumerate(order[:selected_count], start=1):
+    candidate_scores: list[MIRCandidateScore] = []
+    for rank, candidate_index in enumerate(order, start=1):
         item = candidate_items[candidate_index]
         pre_loss = float(pre_losses[candidate_index].detach().cpu().item())
         post_loss = float(post_losses[candidate_index].detach().cpu().item())
         score = float(scores[candidate_index].detach().cpu().item())
-        selections.append(
-            MIRSelection(
+        candidate_scores.append(
+            MIRCandidateScore(
                 global_step=int(global_step),
                 optimizer_step=int(global_step + 1),
                 sample_id=item.sample_id,
@@ -173,6 +187,53 @@ def select_mir_replay_items(
                 interference_score=score,
                 candidate_rank=rank,
                 candidate_count=len(candidate_items),
+            )
+        )
+    return candidate_scores
+
+
+def select_mir_replay_items(
+    *,
+    model: nn.Module,
+    current_x: torch.Tensor,
+    current_y: torch.Tensor,
+    candidate_items: Sequence[ReplayItem],
+    replay_batch_size: int,
+    virtual_lr: float,
+    global_step: int,
+    device: torch.device,
+) -> list[MIRSelection]:
+    """Select the most interfered replay items using ER-MIR's MI-1 score."""
+
+    if replay_batch_size < 1:
+        raise ValueError("replay_batch_size must be positive")
+
+    candidate_scores = score_mir_replay_candidates(
+        model=model,
+        current_x=current_x,
+        current_y=current_y,
+        candidate_items=candidate_items,
+        virtual_lr=virtual_lr,
+        global_step=global_step,
+        device=device,
+    )
+    selected_count = min(replay_batch_size, len(candidate_scores))
+    selections: list[MIRSelection] = []
+    for candidate_score in candidate_scores[:selected_count]:
+        selections.append(
+            MIRSelection(
+                global_step=candidate_score.global_step,
+                optimizer_step=candidate_score.optimizer_step,
+                sample_id=candidate_score.sample_id,
+                source_task_id=candidate_score.source_task_id,
+                original_class_id=candidate_score.original_class_id,
+                replay_count_before_selection=candidate_score.replay_count_before_selection,
+                last_replay_step_before_selection=candidate_score.last_replay_step_before_selection,
+                pre_update_loss=candidate_score.pre_update_loss,
+                post_update_loss=candidate_score.post_update_loss,
+                interference_score=candidate_score.interference_score,
+                candidate_rank=candidate_score.candidate_rank,
+                candidate_count=candidate_score.candidate_count,
             )
         )
     return selections

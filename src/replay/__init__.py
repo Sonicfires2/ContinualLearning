@@ -3,8 +3,10 @@
 from src.replay.buffer import ReplayItem, ReservoirReplayBuffer
 from src.replay.mir import (
     MIR_TRACE_SCHEMA_VERSION,
+    MIRCandidateScore,
     MIRSelection,
     MIRTraceLogger,
+    score_mir_replay_candidates,
     select_mir_replay_items,
 )
 from src.replay.spaced_scheduler import (
@@ -18,6 +20,7 @@ from src.replay.spaced_scheduler import (
 
 __all__ = [
     "MIR_TRACE_SCHEMA_VERSION",
+    "MIRCandidateScore",
     "MIRSelection",
     "MIRTraceLogger",
     "SCHEDULER_TRACE_SCHEMA_VERSION",
@@ -28,5 +31,6 @@ __all__ = [
     "SchedulerSkip",
     "SpacedReplayScheduler",
     "SpacedReplaySchedulerConfig",
+    "score_mir_replay_candidates",
     "select_mir_replay_items",
 ]

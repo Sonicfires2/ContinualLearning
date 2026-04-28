@@ -32,6 +32,11 @@ from src.predictors.learned_forgetting import (
     evaluate_time_to_forgetting_learned_models,
     save_learned_predictor_report,
 )
+from src.predictors.mir_interference_diagnostics import (
+    MIR_INTERFERENCE_DIAGNOSTIC_SCHEMA_VERSION,
+    MIRInterferenceDiagnosticLogger,
+    MIRInterferenceDiagnosticRow,
+)
 from src.predictors.online_forgetting import (
     OnlineForgettingRiskScorer,
     OnlineForgettingRiskScorerMetadata,
@@ -64,6 +69,9 @@ __all__ = [
     "GRADIENT_FEATURE_COLUMNS",
     "HEURISTIC_SCORE_NAMES",
     "LEARNED_PREDICTOR_REPORT_SCHEMA_VERSION",
+    "MIR_INTERFERENCE_DIAGNOSTIC_SCHEMA_VERSION",
+    "MIRInterferenceDiagnosticLogger",
+    "MIRInterferenceDiagnosticRow",
     "OnlineForgettingRiskScorer",
     "OnlineForgettingRiskScorerMetadata",
     "PRIMARY_TIME_TARGET",

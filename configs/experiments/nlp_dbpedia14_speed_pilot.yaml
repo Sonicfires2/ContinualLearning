@@ -1,0 +1,40 @@
+protocol_id: nlp_speed_pilot_v1
+output_root: experiments/runs/nlp_continual_pilot
+
+dataset:
+  name: fancyzhx/dbpedia_14
+  train_split: train
+  eval_split: test
+  label_column: label
+  text_fields:
+    - title
+    - content
+  classes_per_task: 2
+  class_order: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+  train_examples_per_class: 1000
+  eval_examples_per_class: 250
+
+model:
+  name: distilbert-base-uncased
+  max_length: 128
+
+trainer:
+  seed: 0
+  methods:
+    - fine_tuning
+    - random_replay
+    - spaced_replay
+  epochs_per_task: 1
+  batch_size: 32
+  replay_batch_size: 32
+  learning_rate: 0.00002
+  weight_decay: 0.01
+  memory_capacity: 2000
+  use_amp: true
+  num_workers: 0
+
+spaced_replay:
+  min_interval_steps: 1
+  max_interval_steps: 64
+  loss_scale: 5.0
+

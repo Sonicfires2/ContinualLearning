@@ -17,6 +17,8 @@ learning study. The main infrastructure is implemented:
 - Offline forgetting labels, time-to-forgetting targets, learned predictors,
   signal ablations, and result documents.
 - Unit tests for the core modules and smoke tests for the major methods.
+- Final synthesis documentation that explains the benchmark, methods, metrics,
+  results, and current research conclusion.
 
 The current scientific result is mixed but mostly negative for the proposed
 intervention:
@@ -34,8 +36,8 @@ negative result or pivot toward a more MIR-like interference signal.
 
 ## How Close Are We To The Result?
 
-If the goal is a defensible class/project research result, the repository is
-close. It already supports the main conclusion that the current
+If the goal is a defensible class/project research result, the repository is at
+the final-synthesis stage. It already supports the main conclusion that the current
 spacing-inspired and risk-guided replay variants do not beat random replay on
 the locked Split CIFAR-100 setup.
 
@@ -66,6 +68,9 @@ Seed-0 learned replay and diagnostic results:
 | learned risk-gated, threshold `0.90` | `0.0379` | `0.40311111111111114` | `14425` |
 | learned fixed-budget | `0.0759` | `0.3587777777777778` | `45216` |
 | learned hybrid, 50/50 class-balanced | `0.0879` | `0.3428888888888889` | `45216` |
+| Task 22, 25% learned-risk + 75% class-balanced | `0.0986` | `0.3268888888888889` | `45216` |
+| Task 22, 25% learned-risk + 75% random | `0.0879` | `0.33144444444444443` | `45216` |
+| Task 22, class-balanced only | `0.10500000000000001` | `0.2962222222222222` | `45216` |
 | MIR replay | `0.1183` | `0.21400000000000002` | `45216` |
 
 Predictor diagnostics:
@@ -77,6 +82,15 @@ Predictor diagnostics:
 | gradient only | `0.8386703932509996` |
 | best cheap heuristic | `0.8471253916174554` |
 
+MIR-interference diagnostic:
+
+| Diagnostic | Value |
+| --- | ---: |
+| learned-risk AP for MIR top-k candidates | `0.21600508010478187` |
+| MIR top-k base rate | `0.25` |
+| learned-risk top-k overlap with MIR | `0.1792949398443029` |
+| random expected top-k overlap | `0.25` |
+
 Plain-English interpretation:
 
 ```text
@@ -86,19 +100,22 @@ Those are related questions, but they are not the same question.
 MIR is stronger because it asks which old examples the current update would hurt.
 ```
 
+Task 23 confirms this directly: the learned future-risk score does not agree
+with MIR's current-update interference ranking.
+
 ## Start Here
 
 Read these in order:
 
 1. [README.md](../README.md) for the project overview and setup.
-2. [ACTION_PLAN.md](./ACTION_PLAN.md) for the research sequence and current
-   next task.
+2. [FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md) for the full
+   result explanation and final research argument.
 3. [RESULTS_ANALYSIS_RETROSPECTIVE.md](./RESULTS_ANALYSIS_RETROSPECTIVE.md)
    for the simple explanation of what the results mean.
 4. [PROGRESS_LOG.md](./PROGRESS_LOG.md) for the chronological implementation
    record.
-5. [GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md](./GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md)
-   for the most recent completed task.
+5. [ACTION_PLAN.md](./ACTION_PLAN.md) for the research sequence and optional
+   future directions.
 
 ## Setup
 
@@ -112,7 +129,7 @@ Windows PowerShell:
 Expected current test result:
 
 ```text
-87 passed
+91 passed
 ```
 
 The full Split CIFAR-100 runs require CIFAR-100 data under `data/`. The checked
@@ -191,39 +208,21 @@ repository does not need to carry multi-gigabyte generated artifacts.
 
 ## Remaining Tasks
 
-The next task in [ACTION_PLAN.md](./ACTION_PLAN.md) is:
+Task 23 is complete and documented in
+[MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md](./MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md).
+Task 25 is complete and documented in
+[FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md).
 
-```text
-22 - Run a decision checkpoint and small targeted rescue ablations before any
-stretch benchmark
-```
-
-Recommended Task 22 implementation:
-
-1. Run `learned_hybrid_replay_task22_frac025_class_balanced_split_cifar100.yaml`.
-2. Run `learned_hybrid_replay_task22_frac025_random_split_cifar100.yaml`.
-3. Optionally run
-   `learned_hybrid_replay_task22_class_balanced_only_split_cifar100.yaml`.
-4. Compare against random replay, learned fixed-budget replay, learned hybrid
-   50/50, and MIR seed 0.
-5. Write a short decision note:
-   either stop with the clean negative result, or pivot to MIR-like
-   current-interference or representation-drift diagnostics.
-
-Task 22 command template:
-
-```powershell
-.\.venv\Scripts\python.exe -m src.baselines.learned_hybrid_replay --config configs\experiments\learned_hybrid_replay_task22_frac025_class_balanced_split_cifar100.yaml
-```
-
-Tasks after that:
+There is no required next core task. The practical next step is to write the
+final class/project report from the synthesis document, or start a new research
+phase around MIR-style current-interference prediction.
 
 | Task | Status |
 | --- | --- |
-| Task 22: targeted rescue ablations and decision checkpoint | next |
-| Task 23: MIR-like interference or representation-drift diagnostics | optional if continuing method work |
-| Task 24: Split CUB or DistilBERT stretch benchmark | blocked until Split CIFAR-100 conclusion is stable |
-| Task 25: final synthesis, plots, tables, and written argument | final |
+| Task 22: targeted rescue ablations and decision checkpoint | complete |
+| Task 23: MIR-like interference diagnostic | complete |
+| Task 24: Split CUB or DistilBERT stretch benchmark | optional stretch, not recommended before a stronger method |
+| Task 25: final synthesis, plots, tables, and written argument | complete |
 
 ## GitHub Commit Checklist
 

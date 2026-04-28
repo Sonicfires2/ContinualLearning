@@ -52,16 +52,20 @@ estimate forgetting time T_i -> schedule next replay at t + T_i
 
 Therefore, the project must not treat a binary forgetting-risk score as the complete spaced-replay method. Task 9's risk predictor is a useful prerequisite, but the scheduler must either estimate `T_i` directly or define a defensible approximation from risk-over-horizon predictions.
 
-## Current Proposal-Coverage Status After Task 21
+## Current Proposal-Coverage Status After Task 25
 
-Tasks 1 through 21 have built the full core scaffold, the first spacing-inspired
+Tasks 1 through 25 have built the full core scaffold, the first spacing-inspired
 intervention, the first fair core comparison, a stronger MIR replay baseline,
 the first event-triggered risk-gated replay variant, and the first systematic
 learned-predictor comparison, signal-ablation analysis, and a learned-predictor
 risk-gated replay intervention. Task 19 also tested learned-risk ranking under
 the same replay budget as random replay. Task 20 tested a 50/50 learned-risk
-plus class-balanced hybrid. Task 21 tested a gradient-norm diagnostic. The
-project has not yet completed the proposal's full scientific mechanism.
+plus class-balanced hybrid. Task 21 tested a gradient-norm diagnostic. Task 22
+tested lower learned-risk fractions and pure class-balanced replay. Task 23
+tested whether the learned future-risk score agrees with MIR-like
+current-update interference. Task 25 synthesizes the full result into the final
+research argument. The project has not produced a successful proposal-style
+replay mechanism, but it has produced a defensible diagnostic conclusion.
 
 What is already covered well enough for the current stage:
 
@@ -96,6 +100,13 @@ What is already covered well enough for the current stage:
 - A final-layer gradient-norm diagnostic that measures an expensive
   proposal-listed signal and evaluates whether it improves leakage-safe
   forgetting prediction.
+- A decision-checkpoint rescue ablation showing that pure class-balanced replay
+  slightly beats random replay on seed 0, while lower learned-risk hybrids still
+  do not clearly beat random replay.
+- A MIR-like current-interference diagnostic showing that the current learned
+  future-forgetting score does not agree with MIR's top candidate choices.
+- A final synthesis report in [FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md)
+  that explains the benchmark, methods, metrics, results, and conclusion.
 - A consolidated results analysis and retrospective in
   [RESULTS_ANALYSIS_RETROSPECTIVE.md](./RESULTS_ANALYSIS_RETROSPECTIVE.md).
 
@@ -176,6 +187,35 @@ reached `0.9083240127221096`; cheap plus gradient reached
 `0.9080918805327551`. This is a negative diagnostic: this gradient signal is
 measurable, but it does not improve the predictor enough to justify a new
 gradient-based replay scheduler.
+
+Task 22 ran the targeted rescue ablations recommended after Task 21. On seed 0,
+`25%` learned-risk plus `75%` class-balanced replay reached final accuracy
+`0.0986` and average forgetting `0.3268888888888889`; `25%` learned-risk plus
+`75%` random replay reached final accuracy `0.0879` and average forgetting
+`0.33144444444444443`; pure class-balanced replay reached final accuracy
+`0.10500000000000001` and average forgetting `0.2962222222222222`. The pure
+class-balanced run slightly beats random replay seed 0 (`0.10129999999999999`,
+`0.30433333333333334`), but the learned-risk hybrids still do not. This suggests
+that diversity and class coverage are helping more than the current learned
+forgetting-risk score.
+
+Task 23 tested whether the learned future-forgetting score agrees with MIR's
+current-update interference ranking on the same candidate pools. It scored
+`180864` candidate rows across `1413` candidate events. The learned-risk score
+had average precision `0.21600508010478187` for identifying MIR's top-k
+candidates, below the `0.25` base rate, and ROC-AUC
+`0.42531155059460235`. Its mean top-k overlap with MIR was
+`0.1792949398443029`, below the random expected overlap of `0.25`. This
+supports the core diagnosis: offline future-forgetting prediction is not the
+same as online replay usefulness.
+
+Task 25 synthesized the completed evidence into
+[FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md). The final answer is
+mixed: cheap sample-level signals can predict future forgetting offline, but
+the tested spacing-inspired and learned-risk replay policies do not improve
+retention over random replay on the locked Split CIFAR-100 setup. MIR remains
+the strongest implemented method because it selects examples based on
+current-update interference.
 
 ## Two Research Claims Under Test
 
@@ -425,7 +465,7 @@ The plan should be treated as failing, or at least not yet ready for final claim
 - expensive signals or stretch benchmarks delay the core comparison
 - the final writeup claims generalization to language or broad AI systems without evidence from those settings
 
-## Immediate Next Implementation Step
+## Implementation Status
 
 Task 9 is implemented and documented in [FORGETTING_RISK_PREDICTOR.md](./FORGETTING_RISK_PREDICTOR.md).
 Task 10 is implemented and documented in [FIXED_PERIODIC_REPLAY_BASELINE.md](./FIXED_PERIODIC_REPLAY_BASELINE.md).
@@ -440,31 +480,38 @@ Task 18 is implemented and documented in [LEARNED_RISK_GATED_REPLAY_TASK18.md](.
 Task 19 is implemented and documented in [LEARNED_FIXED_BUDGET_REPLAY_TASK19.md](./LEARNED_FIXED_BUDGET_REPLAY_TASK19.md).
 Task 20 is implemented and documented in [LEARNED_HYBRID_REPLAY_TASK20.md](./LEARNED_HYBRID_REPLAY_TASK20.md).
 Task 21 is implemented and documented in [GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md](./GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md).
+Task 22 is implemented and documented in [TASK22_DECISION_CHECKPOINT.md](./TASK22_DECISION_CHECKPOINT.md).
+Task 23 is implemented and documented in [MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md](./MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md).
+Task 25 is implemented and documented in [FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md).
 The current cross-task analysis and retrospective are documented in [RESULTS_ANALYSIS_RETROSPECTIVE.md](./RESULTS_ANALYSIS_RETROSPECTIVE.md).
 The post-Task-18 plan adjustment is documented in [FIXED_BUDGET_LEARNED_REPLAY_PLAN.md](./FIXED_BUDGET_LEARNED_REPLAY_PLAN.md).
 
-The next task is now:
+The final synthesis task is complete. The recommended next step is not another
+numbered core task. The team should either write the final submission from the
+synthesis document or begin a new method-development phase focused on
+MIR-style current-interference prediction.
 
-`22 - Run a decision checkpoint and small targeted rescue ablations before any stretch benchmark`
+Task 24 remains optional stretch work, but it should stay blocked unless the
+team explicitly needs an additional benchmark. A stretch benchmark should not
+be used to hide the current Split CIFAR-100 conclusion.
 
-Task-22 rescue-ablation configs have been staged in
-[configs/experiments](../configs/experiments):
+Task-22 rescue-ablation configs and results are documented in
+[TASK22_DECISION_CHECKPOINT.md](./TASK22_DECISION_CHECKPOINT.md). The configs
+are in [configs/experiments](../configs/experiments):
 
 - `learned_hybrid_replay_task22_frac025_class_balanced_split_cifar100.yaml`
 - `learned_hybrid_replay_task22_frac025_random_split_cifar100.yaml`
 - `learned_hybrid_replay_task22_class_balanced_only_split_cifar100.yaml`
 
-The next implementation unit should run the following:
+The next implementation unit should create:
 
-1. a small ablation config for lower learned-risk fractions, starting with
-   `0.25` learned risk and `0.75` class-balanced or random replay;
-2. optionally, a pure class-balanced replay baseline to separate diversity from
-   learned risk;
-3. a one-seed comparison against random replay, learned fixed-budget replay,
-   learned hybrid 50/50, and MIR;
-4. a decision note stating whether to stop with the clean negative result or
-   pivot toward MIR-like current-interference or representation-drift
-   diagnostics.
+1. a final result table covering fine-tuning, random replay, fixed-periodic
+   replay, spaced replay, MIR, learned-risk replay, hybrid replay,
+   class-balanced replay, gradient diagnostics, and MIR-interference
+   diagnostics;
+2. a written argument separating predictive success from intervention failure;
+3. a clear statement that the current project supports a clean diagnostic result,
+   not a positive claim for learned-risk replay.
 
 Because Task 13 produced a clean negative result for the first spaced scheduler
 and Task 14 shows MIR is stronger than random replay, Task 15 tested whether
@@ -482,8 +529,13 @@ does not beat random replay. The next research step can now move to expensive
 signals, but only as a diagnostic for why the current cheap learned-risk signal
 is not intervention-effective. Task 21 tested final-layer gradient norms and
 found that they do not improve prediction over cheap features enough to justify
-a new replay scheduler. The plan should therefore insert a decision checkpoint
-before stretch benchmarks.
+a new replay scheduler. Task 22 tested the decision-checkpoint rescue
+ablations. It found that pure class-balanced replay is a useful baseline, but
+minor learned-risk fraction tuning does not rescue learned-risk replay. The plan
+then tested MIR-like current-interference diagnostics in Task 23 and found that
+the learned future-risk score does not align with MIR's candidate ranking. Task
+25 completed the final synthesis, so the core project is now ready for final
+reporting or a clearly separated new research phase.
 
 ## Definition of Done
 
@@ -497,3 +549,8 @@ The plan is complete when the repository can produce a documented experiment tha
 6. Explains, through ablations or stronger baselines, why the final result is scientifically credible.
 
 The stronger definition of done is that another researcher can rerun the core experiment from the saved configs and reproduce the same tables within expected seed variability.
+
+Current status after Task 25: the standard definition of done is satisfied for
+the Split CIFAR-100 diagnostic study. The stronger reproducibility goal is
+supported by saved configs, code, tests, and documentation, but full repeated
+reruns still depend on local CIFAR-100 data and normal seed variability.

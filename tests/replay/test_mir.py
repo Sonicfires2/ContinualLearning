@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from src.replay import ReplayItem, select_mir_replay_items
+from src.replay import ReplayItem, score_mir_replay_candidates, select_mir_replay_items
 
 
 def _item(sample_id, target, x):
@@ -64,3 +64,32 @@ def test_mir_selection_returns_empty_for_empty_candidates():
     )
 
     assert selections == []
+
+
+def test_mir_candidate_scoring_returns_all_ranked_candidates():
+    model = nn.Linear(2, 2, bias=False)
+    with torch.no_grad():
+        model.weight.copy_(torch.tensor([[1.0, 0.0], [0.0, 1.0]]))
+    before = [parameter.detach().clone() for parameter in model.parameters()]
+    candidates = [
+        _item(1, 0, [1.0, 0.0]),
+        _item(2, 1, [0.0, 1.0]),
+        _item(3, 0, [0.5, 0.5]),
+    ]
+
+    scores = score_mir_replay_candidates(
+        model=model,
+        current_x=torch.tensor([[0.0, 1.0]], dtype=torch.float32),
+        current_y=torch.tensor([0], dtype=torch.long),
+        candidate_items=candidates,
+        virtual_lr=0.1,
+        global_step=5,
+        device=torch.device("cpu"),
+    )
+
+    assert len(scores) == len(candidates)
+    assert [row.candidate_rank for row in scores] == [1, 2, 3]
+    assert scores[0].interference_score >= scores[1].interference_score
+    assert scores[1].interference_score >= scores[2].interference_score
+    for parameter, original in zip(model.parameters(), before, strict=True):
+        assert torch.allclose(parameter, original)

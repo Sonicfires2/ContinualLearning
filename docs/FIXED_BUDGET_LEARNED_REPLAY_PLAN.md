@@ -196,10 +196,10 @@ The near-term research sequence is now:
 Task 19: fixed-budget learned-risk replay - complete, negative
 Task 20: balanced hybrid learned-risk replay - complete, mixed but negative
 Task 21: gradient signal diagnostic - complete, negative
-Task 22: decision checkpoint and targeted rescue ablations - next
-Task 23: optional MIR-like interference or representation-drift diagnostics
+Task 22: decision checkpoint and targeted rescue ablations - complete
+Task 23: MIR-like interference diagnostic - complete, negative for learned-risk alignment
 Task 24: stretch benchmarks only after the Split CIFAR-100 conclusion is stable
-Task 25: final synthesis
+Task 25: final synthesis - complete
 ```
 
 ## Success Criteria
@@ -216,8 +216,19 @@ Task 21 did not show a useful gain from final-layer gradient norms. This means
 the project should not build a gradient-norm replay intervention from the
 current signal. Stretch benchmarks should stay behind a decision checkpoint.
 
-The final report should be honest either way. A clean negative result is still
-valuable if it shows:
+Task 22 showed that pure class-balanced replay slightly beats random replay on
+seed 0, while lower learned-risk hybrids still do not clearly beat random
+replay. This strengthens the diagnosis that diversity/class coverage helps more
+than the current learned-risk score.
+
+Task 23 showed why MIR remains different: the learned future-forgetting score
+does not identify MIR's current-interference top candidates. Its AP for MIR
+top-k candidates is `0.21600508010478187`, below the `0.25` base rate.
+
+Task 25 turns that evidence into the final synthesis in
+[FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md). The final report
+should be honest either way. A clean negative result is still valuable if it
+shows:
 
 ```text
 offline forgetting prediction does not automatically translate into better

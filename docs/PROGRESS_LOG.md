@@ -4,6 +4,253 @@
 
 This document records implementation progress in a way that stays tied to the research goal, not just to code activity. Each entry should explain what was changed, why it was changed at that point in the sequence, and how the change strengthens the final scientific claim.
 
+## Progress Entry: 2026-04-28
+
+Task: `First sampled NLP continual-learning result`  
+Status: `complete`
+
+### What I did
+
+- added [nlp_dbpedia14_speed_pilot.yaml](../configs/experiments/nlp_dbpedia14_speed_pilot.yaml)
+- added [run_nlp_continual_pilot.py](../scripts/run_nlp_continual_pilot.py)
+- implemented a sampled Split DBpedia14 task stream with stable text sample IDs
+- implemented DistilBERT sequential fine-tuning, random replay, and spaced
+  replay proxy methods
+- ran the one-seed sampled NLP pilot on the CUDA-enabled `.venv-nlp`
+- added [NLP_PROGRESS.md](./NLP_PROGRESS.md) as the tracking document for NLP
+  progress and results
+
+### Result
+
+| Method | Final accuracy | Avg forgetting | Replay samples | Time, sec |
+| --- | ---: | ---: | ---: | ---: |
+| fine-tuning | `0.30428571428571427` | `0.806` | `0` | `72.27` |
+| random replay | `0.9880000000000001` | `0.006000000000000005` | `12096` | `98.98` |
+| spaced replay | `0.9857142857142858` | `0.008000000000000007` | `12096` | `100.03` |
+
+### Scientific interpretation
+
+The NLP pilot shows the same broad pattern as the image study. Sequential
+fine-tuning causes severe forgetting, replay nearly eliminates forgetting, and
+the first spaced replay proxy is close to random replay but does not beat it.
+
+This confirms that the project can now produce a strictly NLP continual-learning
+result. The next NLP task should evaluate whether text-example forgetting can be
+predicted from the saved `eval_signals.json` artifacts.
+
+### Evidence of completion
+
+- tracking document: [NLP_PROGRESS.md](./NLP_PROGRESS.md)
+- runner:
+  [run_nlp_continual_pilot.py](../scripts/run_nlp_continual_pilot.py)
+- config:
+  [nlp_dbpedia14_speed_pilot.yaml](../configs/experiments/nlp_dbpedia14_speed_pilot.yaml)
+- run command:
+  `.\.venv-nlp\Scripts\python.exe scripts\run_nlp_continual_pilot.py --config configs\experiments\nlp_dbpedia14_speed_pilot.yaml`
+- NLP runner compile check:
+  `.\.venv-nlp\Scripts\python.exe -m py_compile scripts\run_nlp_continual_pilot.py`
+- full regression command:
+  `.\.venv\Scripts\python.exe -m pytest -q`
+- full regression result:
+  `91 passed in 9.48s`
+
+## Progress Entry: 2026-04-28
+
+Task: `NLP speed-first pivot setup and action plan`  
+Status: `complete`
+
+### What I did
+
+- detected the local NVIDIA GPU with `nvidia-smi`
+- found that the original `.venv` had CPU-only PyTorch
+- installed Python `3.13.13` through `uv`
+- created a separate CUDA-enabled NLP environment at `.venv-nlp`
+- installed CUDA PyTorch, Transformers, Datasets, Accelerate, scikit-learn, and
+  reporting utilities into `.venv-nlp`
+- verified DistilBERT runs on the RTX GPU
+- added [NLP_SPEED_ACTION_PLAN.md](./NLP_SPEED_ACTION_PLAN.md)
+- updated [.gitignore](../.gitignore) so `.venv-nlp/` is not committed
+
+### GPU verification
+
+```text
+torch: 2.11.0+cu128
+cuda_available: true
+cuda_runtime: 12.8
+device: NVIDIA GeForce RTX 5070 Ti Laptop GPU
+batch-32 DistilBERT forward time: 0.2288 seconds
+```
+
+### Scientific interpretation
+
+The project can pivot to a strictly NLP version within a 10-hour window if it
+uses a sampled benchmark. The recommended first NLP benchmark is sampled Split
+DBpedia14 with DistilBERT because it is class-incremental, strictly textual,
+and likely to show clearer forgetting than same-label sentiment domains.
+
+### Evidence of completion
+
+- NLP action plan: [NLP_SPEED_ACTION_PLAN.md](./NLP_SPEED_ACTION_PLAN.md)
+- CUDA check command:
+  `.\.venv-nlp\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"`
+- DistilBERT GPU check:
+  `forward_seconds_batch32 = 0.2288`
+
+## Progress Entry: 2026-04-28
+
+Task: `25 - Synthesize the final results into tables, plots, and a written argument tied back to the research question`  
+Status: `complete`
+
+### What I did
+
+- added [FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md)
+- added [plot_final_synthesis.py](../scripts/plot_final_synthesis.py) and
+  generated Task-25 figures under [figures](./figures)
+- explained the project background, Split CIFAR-100 benchmark, evaluated
+  metrics, replay methods, learned predictors, MIR, gradient diagnostics, and
+  MIR-interference diagnostics
+- consolidated the main repeated-seed results, seed-0 learned replay results,
+  offline predictor results, expensive-signal results, and MIR-diagnostic
+  results into one report-style document
+- updated [ACTION_PLAN.md](./ACTION_PLAN.md), [TEAMMATE_HANDOFF.md](./TEAMMATE_HANDOFF.md),
+  [RESULTS_ANALYSIS_RETROSPECTIVE.md](./RESULTS_ANALYSIS_RETROSPECTIVE.md),
+  [FIXED_BUDGET_LEARNED_REPLAY_PLAN.md](./FIXED_BUDGET_LEARNED_REPLAY_PLAN.md),
+  and [README.md](../README.md) so the repository now points to Task 25 as the
+  completed final synthesis
+
+### Final synthesis result
+
+The stable conclusion is:
+
+```text
+Sample-level signals can predict future forgetting offline, but the tested
+spacing-inspired and learned-risk replay policies do not improve continual
+learning over random replay on the locked Split CIFAR-100 setup.
+```
+
+MIR remains the strongest implemented replay method because it chooses old
+examples based on current-update interference. The learned forgetting predictor
+is good at predicting which examples may be forgotten later, but the Task-23
+diagnostic shows that this score does not agree with MIR's replay choices.
+
+### Evidence of completion
+
+- final synthesis document:
+  [FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md)
+- figure-generation command:
+  `.\.venv\Scripts\python.exe scripts\plot_final_synthesis.py`
+- verification command: `.\.venv\Scripts\python.exe -m pytest -q`
+- verification result: `91 passed in 5.34s`
+
+## Progress Entry: 2026-04-27
+
+Task: `23 - If continuing method development, test MIR-like current-interference or representation-drift diagnostics`  
+Status: `complete`
+
+### What I did
+
+- added all-candidate MIR scoring in [src/replay/mir.py](../src/replay/mir.py)
+- added MIR-vs-learned-risk diagnostic metrics in
+  [src/predictors/mir_interference_diagnostics.py](../src/predictors/mir_interference_diagnostics.py)
+- added the runnable diagnostic baseline in
+  [src/baselines/mir_interference_diagnostic.py](../src/baselines/mir_interference_diagnostic.py)
+- added smoke and Split CIFAR-100 configs
+- ran the smoke diagnostic and the Split CIFAR-100 seed-0 diagnostic
+- added [MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md](./MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md)
+
+### Results
+
+Split CIFAR-100 seed 0:
+
+| Metric | Value |
+| --- | ---: |
+| final accuracy | `0.10090000000000002` |
+| average forgetting | `0.30144444444444446` |
+| candidate rows scored | `180864` |
+| MIR top-k target rate | `0.25` |
+| learned-risk AP for MIR top-k | `0.21600508010478187` |
+| learned-risk ROC-AUC for MIR top-k | `0.42531155059460235` |
+| learned-risk top-k overlap with MIR top-k | `0.1792949398443029` |
+| random expected top-k overlap | `0.25` |
+
+### Scientific interpretation
+
+This is a strong diagnostic result. The learned future-forgetting score does
+not align with MIR's current-update interference score. It overlaps with MIR's
+top candidate choices less than random selection would.
+
+This explains why the learned predictor can have high offline future-forgetting
+average precision but still fail as a replay selector.
+
+The recommended next task is Task 25: final synthesis.
+
+### Evidence of completion
+
+- Task 23 document:
+  [MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md](./MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md)
+- focused verification command:
+  `.\.venv\Scripts\python.exe -m pytest tests\replay\test_mir.py tests\predictors\test_mir_interference_diagnostics.py tests\baselines\test_mir_interference_diagnostic.py -q`
+- focused verification result: `6 passed`
+- full verification command: `.\.venv\Scripts\python.exe -m pytest -q`
+- full verification result: `91 passed`
+
+## Progress Entry: 2026-04-27
+
+Task: `22 - Run a decision checkpoint and small targeted rescue ablations before any stretch benchmark`  
+Status: `complete`
+
+### What I did
+
+- ran the three Task-22 rescue-ablation configs:
+  - `25%` learned-risk plus `75%` class-balanced replay
+  - `25%` learned-risk plus `75%` random replay
+  - pure class-balanced replay
+- added [TASK22_DECISION_CHECKPOINT.md](./TASK22_DECISION_CHECKPOINT.md)
+- updated [ACTION_PLAN.md](./ACTION_PLAN.md),
+  [RESULTS_ANALYSIS_RETROSPECTIVE.md](./RESULTS_ANALYSIS_RETROSPECTIVE.md),
+  [TEAMMATE_HANDOFF.md](./TEAMMATE_HANDOFF.md), and [README.md](../README.md)
+
+### Results
+
+| Method, seed 0 | Final accuracy | Avg forgetting | Replay samples |
+| --- | ---: | ---: | ---: |
+| random replay | `0.10129999999999999` | `0.30433333333333334` | `45216` |
+| learned hybrid, 50/50 class-balanced | `0.0879` | `0.3428888888888889` | `45216` |
+| Task 22, 25% learned-risk + 75% random | `0.0879` | `0.33144444444444443` | `45216` |
+| Task 22, 25% learned-risk + 75% class-balanced | `0.0986` | `0.3268888888888889` | `45216` |
+| Task 22, class-balanced only | `0.10500000000000001` | `0.2962222222222222` | `45216` |
+| MIR replay | `0.1183` | `0.21400000000000002` | `45216` |
+
+### Predictor status
+
+The current prior-artifact logistic forgetting predictor remains strong
+offline:
+
+| Metric | Value |
+| --- | ---: |
+| average precision | `0.9083240127221096` |
+| ROC-AUC | `0.7978139160228613` |
+| top-10% precision | `0.954177897574124` |
+| top-20% precision | `0.9473684210526315` |
+| top-30% precision | `0.9316546762589928` |
+
+### Scientific interpretation
+
+Task 22 strengthens the current conclusion. Lowering the learned-risk share
+does not rescue learned-risk replay. The only rescue ablation that beats random
+replay on seed 0 is pure class-balanced replay, which suggests diversity and
+class coverage are more useful than the current learned-risk score.
+
+The next research choice is either to move to Task 23 and test MIR-like
+current-interference diagnostics, or move to Task 25 and synthesize the clean
+negative result.
+
+### Evidence of completion
+
+- Task 22 document: [TASK22_DECISION_CHECKPOINT.md](./TASK22_DECISION_CHECKPOINT.md)
+- verification command: `.\.venv\Scripts\python.exe -m pytest -q`
+- verification result: `87 passed`
+
 ## Progress Entry: 2026-04-27
 
 Task: `Repository handoff and GitHub readiness`  
@@ -34,15 +281,15 @@ large benchmark.
 
 ### Current status
 
-The repository has implemented Tasks 1 through 21. The main result so far is:
+The repository has implemented Tasks 1 through 22. The main result so far is:
 
 ```text
 forgetting can be predicted offline, but the tested risk-guided replay policies
 do not yet beat random replay online
 ```
 
-The next research task remains Task 22: a small targeted rescue ablation and
-decision checkpoint.
+The next research choice is Task 23 for MIR-like current-interference
+diagnostics, or Task 25 for final synthesis of the clean negative result.
 
 ### Evidence of completion
 

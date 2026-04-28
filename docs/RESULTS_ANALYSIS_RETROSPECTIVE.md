@@ -17,6 +17,10 @@ But using those predictors to choose replay examples has not beaten random repla
 That is still a valid research result. It means prediction and intervention are
 not the same thing.
 
+For the full Task-25 final synthesis, including background, method
+descriptions, benchmark definitions, metric explanations, and result tables, see
+[FINAL_SYNTHESIS_TASK25.md](./FINAL_SYNTHESIS_TASK25.md).
+
 ## What The Project Has Shown
 
 ### 1. The benchmark is real
@@ -84,6 +88,9 @@ replay:
 | learned risk-gated, threshold `0.90` | `0.0379` | `0.40311111111111114` | `14425` |
 | learned fixed-budget | `0.0759` | `0.3587777777777778` | `45216` |
 | learned hybrid 50/50 class-balanced | `0.0879` | `0.3428888888888889` | `45216` |
+| Task 22, 25% learned-risk + 75% class-balanced | `0.0986` | `0.3268888888888889` | `45216` |
+| Task 22, 25% learned-risk + 75% random | `0.0879` | `0.33144444444444443` | `45216` |
+| Task 22, class-balanced only | `0.10500000000000001` | `0.2962222222222222` | `45216` |
 | MIR replay | `0.1183` | `0.21400000000000002` | `45216` |
 
 Plain explanation:
@@ -95,6 +102,11 @@ next update does less damage?"
 ```
 
 Those are related, but they are not identical.
+
+Task 22 adds one important nuance: pure class-balanced replay slightly beats
+random replay on seed 0, while adding learned-risk selection back in does not.
+That suggests the useful ingredient in the rescue ablation is diversity, not
+the current learned-risk score.
 
 ### 6. Final-layer gradient norm did not rescue the predictor
 
@@ -114,6 +126,31 @@ Plain explanation:
 ```text
 This gradient signal costs more, but does not tell us more.
 ```
+
+### 7. MIR-style current-interference explains the mismatch
+
+Task 23 compared the learned future-forgetting score against MIR's
+current-update interference ranking on the same replay candidate pools:
+
+| Diagnostic | Value |
+| --- | ---: |
+| candidate rows | `180864` |
+| MIR top-k base rate | `0.25` |
+| learned-risk AP for MIR top-k | `0.21600508010478187` |
+| learned-risk ROC-AUC for MIR top-k | `0.42531155059460235` |
+| learned-risk top-k overlap with MIR | `0.1792949398443029` |
+| random expected top-k overlap | `0.25` |
+
+Plain explanation:
+
+```text
+The learned predictor is good at "which examples may be forgotten later?"
+MIR is good at "which examples is this current update about to damage?"
+Those are different jobs.
+```
+
+The learned-risk score overlaps with MIR less than random selection would. That
+strongly explains why learned-risk replay has not worked as an intervention.
 
 ## What This Means
 
@@ -135,6 +172,9 @@ learned-risk methods sit between those ideas and get the best of neither:
 
 - they are less broad than random replay;
 - they are less update-aware than MIR.
+
+Task 23 makes that explanation concrete: the learned-risk score does not pick
+the same candidates that MIR's current-interference calculation picks.
 
 ## Are The Research Goals Still Valid?
 
@@ -202,14 +242,13 @@ make the negative result larger and harder to debug.
 
 Recommended modified sequence:
 
-1. Run a small targeted rescue ablation if desired:
-   `25%` learned-risk plus `75%` random/class-balanced replay, and possibly a
-   pure class-balanced replay baseline.
-2. Add a decision checkpoint:
-   either write the final report as a clean negative result, or pivot the method
-   toward MIR-like current-interference signals.
-3. If continuing method development, test representation drift or MIR
-   distillation as diagnostics before building another scheduler.
+1. Treat the Task 22 rescue ablation as complete:
+   class-balanced replay is a useful baseline, but learned-risk selection still
+   has not been rescued.
+2. Treat the Task 23 MIR-interference diagnostic as complete:
+   the current learned-risk score does not agree with MIR's replay choices.
+3. Write the final report as a clean diagnostic result unless the team wants a
+   new project phase built around current-interference methods.
 4. Move Split CUB, DistilBERT, and other stretch benchmarks behind this
    decision point.
 

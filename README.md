@@ -63,6 +63,23 @@ The current locked core protocol is:
 14. The current retrospective conclusion is that forgetting can be predicted
     offline, but the tested risk-guided replay policies do not yet beat random
     replay as interventions.
+15. Task 22 rescue ablations are complete. Pure class-balanced replay slightly
+    beat random replay on seed 0, while lower learned-risk hybrids still did
+    not clearly beat random replay. This points to diversity/class coverage as
+    more useful than the current learned-risk selector.
+16. Task 23 MIR-like interference diagnostics are complete. The learned
+    future-forgetting score does not agree with MIR's current-interference
+    ranking; its average precision for MIR top-k candidates is only `0.2160`
+    against a `0.25` base rate.
+17. Task 25 final synthesis is complete. The stable conclusion is that
+    forgetting is predictable offline, but the tested spacing-inspired and
+    learned-risk replay policies do not beat random replay online; MIR remains
+    the strongest implemented replay method.
+18. A speed-first NLP pivot plan is available for running a sampled
+    DistilBERT continual-finetuning pilot on the local RTX GPU.
+19. The first one-seed NLP result is complete on sampled Split DBpedia14:
+    fine-tuning forgets badly, while random replay and spaced replay both
+    preserve old text tasks; spaced replay does not beat random replay.
 
 See:
 - [docs/TEAMMATE_HANDOFF.md](docs/TEAMMATE_HANDOFF.md)
@@ -81,6 +98,11 @@ See:
 - [docs/LEARNED_FIXED_BUDGET_REPLAY_TASK19.md](docs/LEARNED_FIXED_BUDGET_REPLAY_TASK19.md)
 - [docs/LEARNED_HYBRID_REPLAY_TASK20.md](docs/LEARNED_HYBRID_REPLAY_TASK20.md)
 - [docs/GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md](docs/GRADIENT_SIGNAL_DIAGNOSTIC_TASK21.md)
+- [docs/TASK22_DECISION_CHECKPOINT.md](docs/TASK22_DECISION_CHECKPOINT.md)
+- [docs/MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md](docs/MIR_INTERFERENCE_DIAGNOSTIC_TASK23.md)
+- [docs/FINAL_SYNTHESIS_TASK25.md](docs/FINAL_SYNTHESIS_TASK25.md)
+- [docs/NLP_SPEED_ACTION_PLAN.md](docs/NLP_SPEED_ACTION_PLAN.md)
+- [docs/NLP_PROGRESS.md](docs/NLP_PROGRESS.md)
 - [docs/RESULTS_ANALYSIS_RETROSPECTIVE.md](docs/RESULTS_ANALYSIS_RETROSPECTIVE.md)
 - [configs/protocols/core_experiment.yaml](configs/protocols/core_experiment.yaml)
 - [docs/PROGRESS_LOG.md](docs/PROGRESS_LOG.md)
@@ -106,7 +128,7 @@ Verify the current codebase:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The expected current result is `87 passed`.
+The expected current result is `91 passed`.
 
 Files of interest:
 - [requirements.txt](requirements.txt)
