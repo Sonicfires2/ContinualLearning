@@ -1,8 +1,8 @@
-"""Fixed-budget replay that ranks memory items by learned forgetting risk."""
+"""Random replay diagnostic run for the proposal's four signal families."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -14,39 +14,38 @@ from src.baselines.fine_tuning import (
     build_fixture_streams,
     build_real_split_cifar100_streams,
 )
-from src.baselines.learned_risk_gated_replay import _build_risk_scorer
-from src.baselines.random_replay import RandomReplayBaselineRun
-from src.baselines.spaced_replay import (
-    SpacedReplayBaselineConfig,
-    _scheduler_config,
-    _train_spaced_replay,
+from src.baselines.random_replay import (
+    RandomReplayBaselineConfig,
+    RandomReplayBaselineRun,
+    _train_random_replay,
 )
 from src.experiment_tracking import ExperimentRunConfig, save_experiment_artifacts
 from src.models import build_mlp, count_parameters
-from src.replay import ReservoirReplayBuffer, SpacedReplayScheduler, SpacedReplaySchedulerConfig
-from src.signals import SIGNAL_FIELDS, SampleSignalLogger
+from src.replay import ReservoirReplayBuffer
+from src.signals import (
+    GRADIENT_SIGNAL_FIELDS,
+    REPRESENTATION_SIGNAL_FIELDS,
+    SIGNAL_FIELDS,
+    GradientSignalLogger,
+    RepresentationDriftLogger,
+    SampleSignalLogger,
+)
 from src.training import ContinualTrainerConfig
 
 
 @dataclass(frozen=True)
-class LearnedFixedBudgetReplayConfig(SpacedReplayBaselineConfig):
-    """Configuration for matched-budget learned-risk replay selection."""
+class ProposalSignalDiagnosticConfig(RandomReplayBaselineConfig):
+    """Configuration for the proposal-signal diagnostic."""
 
-    method_name: str = "learned_fixed_budget_replay"
-    run_name: str = "learned_fixed_budget_replay_baseline"
-    scheduler_budget_mode: str = "risk_ranked"
-    risk_threshold: float = 0.0
-    learned_predictor_signal_path: str | None = None
-    learned_predictor_label_path: str | None = None
-    learned_predictor_feature_group: str = "all_features"
-    learned_predictor_train_anchor_task_max: int | None = None
+    method_name: str = "proposal_signal_diagnostic"
+    run_name: str = "proposal_signal_diagnostic_baseline"
+    log_gradient_signals: bool = True
+    log_representation_signals: bool = True
 
 
 def _experiment_run_config(
     *,
-    config: LearnedFixedBudgetReplayConfig,
-    scheduler_config: SpacedReplaySchedulerConfig,
-    risk_scorer,
+    config: ProposalSignalDiagnosticConfig,
     model_parameter_count: int,
     class_order: tuple[int, ...],
 ) -> ExperimentRunConfig:
@@ -82,23 +81,19 @@ def _experiment_run_config(
         },
         evaluation={
             "schedule": "evaluate_all_seen_tasks_after_each_task",
-            "metrics": [
-                "final_accuracy",
-                "average_forgetting",
-                "average_accuracy",
-                "total_replay_samples",
-                "effective_replay_ratio",
-            ],
+            "metrics": ["final_accuracy", "average_forgetting", "average_accuracy"],
         },
         task_split={"class_order": list(class_order)},
         method={
-            "description": "fixed-budget replay selecting highest learned forgetting-risk memory items",
+            "description": "random replay diagnostic for proposal signal families",
             "uses_replay": True,
-            "forgetting_aware": True,
-            "event_triggered": False,
-            "skips_low_risk_replay": False,
-            "learned_predictor_ranker": True,
-            "matched_replay_budget_to_random_replay": True,
+            "diagnostic_only": True,
+            "proposal_signal_families": [
+                "loss_trajectory",
+                "uncertainty",
+                "gradient_norm",
+                "representation_drift",
+            ],
         },
         replay={
             "enabled": True,
@@ -106,39 +101,61 @@ def _experiment_run_config(
             "replay_batch_size": config.replay_batch_size,
             "replay_seed": config.replay_seed,
             "insertion_policy": config.replay_insertion_policy,
-            "sampling_policy": "learned_risk_ranked_fixed_budget",
-            "schedule": "learned_fixed_budget_replay",
-            "scheduler": asdict(scheduler_config),
-            "risk_scorer": risk_scorer.to_json_metadata(),
+            "sampling_policy": "uniform_random",
         },
         signals={
             "enabled": config.log_signals,
             "artifact": "sample_signals.json" if config.log_signals else None,
             "fields": list(SIGNAL_FIELDS) if config.log_signals else [],
+            "gradient_signals_enabled": config.log_gradient_signals,
+            "gradient_artifact": (
+                "gradient_signals.json" if config.log_gradient_signals else None
+            ),
+            "gradient_fields": (
+                list(GRADIENT_SIGNAL_FIELDS) if config.log_gradient_signals else []
+            ),
+            "representation_signals_enabled": config.log_representation_signals,
+            "representation_artifact": (
+                "representation_signals.json"
+                if config.log_representation_signals
+                else None
+            ),
+            "representation_fields": (
+                list(REPRESENTATION_SIGNAL_FIELDS)
+                if config.log_representation_signals
+                else []
+            ),
             "observation_types": (
                 ["current_train", "replay_train", "seen_task_eval"]
                 if config.log_signals
                 else []
             ),
+            "gradient_observation_types": (
+                ["seen_task_eval"] if config.log_gradient_signals else []
+            ),
+            "representation_observation_types": (
+                ["seen_task_eval"] if config.log_representation_signals else []
+            ),
         },
     )
 
 
-def run_learned_fixed_budget_replay(
-    config: LearnedFixedBudgetReplayConfig,
+def run_proposal_signal_diagnostic(
+    config: ProposalSignalDiagnosticConfig,
 ) -> RandomReplayBaselineRun:
-    """Run learned-risk replay with the same replay budget pattern as random replay."""
+    """Run random replay while logging all proposal signal families."""
 
     if config.target_key != "original_class_id":
-        raise ValueError(
-            "learned fixed-budget replay defaults to class-incremental original_class_id targets"
-        )
+        raise ValueError("proposal signal diagnostic defaults to original_class_id targets")
     if config.replay_insertion_policy != "reservoir_task_end":
         raise ValueError("only reservoir_task_end insertion is currently implemented")
-    if config.scheduler_budget_mode != "risk_ranked":
-        raise ValueError("learned fixed-budget replay requires risk_ranked budget mode")
+    if not config.log_signals:
+        raise ValueError("proposal diagnostics require sample signal logging")
+    if not config.log_gradient_signals:
+        raise ValueError("proposal diagnostics require gradient signal logging")
+    if not config.log_representation_signals:
+        raise ValueError("proposal diagnostics require representation signal logging")
 
-    risk_scorer = _build_risk_scorer(config)
     if config.smoke:
         train_stream, eval_stream, input_shape, class_order = build_fixture_streams(config)
     else:
@@ -166,13 +183,10 @@ def run_learned_fixed_budget_replay(
         capacity=config.replay_capacity,
         seed=config.replay_seed,
     )
-    scheduler_config = _scheduler_config(config)
-    scheduler_config = SpacedReplaySchedulerConfig(
-        **{**asdict(scheduler_config), "risk_score_source": "learned"}
-    )
-    scheduler = SpacedReplayScheduler(scheduler_config, risk_scorer=risk_scorer)
-    signal_logger = SampleSignalLogger() if config.log_signals else None
-    result = _train_spaced_replay(
+    signal_logger = SampleSignalLogger()
+    gradient_signal_logger = GradientSignalLogger()
+    representation_signal_logger = RepresentationDriftLogger()
+    result = _train_random_replay(
         model=model,
         train_stream=train_stream,
         eval_stream=eval_stream,
@@ -180,16 +194,15 @@ def run_learned_fixed_budget_replay(
         trainer_config=trainer_config,
         replay_buffer=replay_buffer,
         replay_batch_size=config.replay_batch_size,
-        scheduler=scheduler,
-        schedule_name="learned_fixed_budget_replay",
         signal_logger=signal_logger,
+        gradient_signal_logger=gradient_signal_logger,
+        representation_signal_logger=representation_signal_logger,
     )
-    if signal_logger is not None:
-        result.method_metrics["signals"] = signal_logger.summary()
+    result.method_metrics["signals"] = signal_logger.summary()
+    result.method_metrics["gradient_signals"] = gradient_signal_logger.summary()
+    result.method_metrics["representation_signals"] = representation_signal_logger.summary()
     run_config = _experiment_run_config(
         config=config,
-        scheduler_config=scheduler_config,
-        risk_scorer=risk_scorer,
         model_parameter_count=count_parameters(model),
         class_order=class_order,
     )
@@ -200,16 +213,12 @@ def run_learned_fixed_budget_replay(
         overwrite=config.overwrite,
         extra_metadata={
             "baseline_status": "smoke" if config.smoke else "real_split_cifar100",
-            "research_role": "fixed_budget_learned_risk_replay",
-            "risk_scorer": risk_scorer.to_json_metadata(),
+            "research_role": "proposal_signal_diagnostic",
         },
         extra_json_artifacts={
-            **(
-                {"sample_signals": signal_logger.to_json_payload()}
-                if signal_logger is not None
-                else {}
-            ),
-            "scheduler_trace": scheduler.to_json_payload(),
+            "sample_signals": signal_logger.to_json_payload(),
+            "gradient_signals": gradient_signal_logger.to_json_payload(),
+            "representation_signals": representation_signal_logger.to_json_payload(),
         },
     )
     return RandomReplayBaselineRun(
@@ -219,57 +228,46 @@ def run_learned_fixed_budget_replay(
     )
 
 
-def load_config(path: str | Path) -> LearnedFixedBudgetReplayConfig:
+def load_config(path: str | Path) -> ProposalSignalDiagnosticConfig:
     raw = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
-    if not isinstance(raw, dict) or "learned_fixed_budget_replay" not in raw:
-        raise ValueError("config must contain a learned_fixed_budget_replay section")
-    section = raw["learned_fixed_budget_replay"]
+    if not isinstance(raw, dict) or "proposal_signal_diagnostic" not in raw:
+        raise ValueError("config must contain a proposal_signal_diagnostic section")
+    section: dict[str, Any] = raw["proposal_signal_diagnostic"]
     if "hidden_dims" in section:
         section["hidden_dims"] = tuple(section["hidden_dims"])
-    return LearnedFixedBudgetReplayConfig(**section)
+    return ProposalSignalDiagnosticConfig(**section)
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser(description="Run fixed-budget learned-risk replay")
-    parser.add_argument("--config", type=str, required=True, help="Path to baseline YAML")
-    parser.add_argument("--seed", type=int, default=None, help="Optional trainer seed override")
-    parser.add_argument(
-        "--replay-seed",
-        type=int,
-        default=None,
-        help="Optional replay-buffer seed override. Defaults to --seed when set.",
-    )
-    parser.add_argument("--run-name", type=str, default=None, help="Optional run name override")
+    parser = argparse.ArgumentParser(description="Run proposal signal diagnostic")
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config")
+    parser.add_argument("--seed", type=int, default=None, help="Optional seed override")
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
-    if args.seed is not None or args.replay_seed is not None or args.run_name is not None:
-        seed = config.seed if args.seed is None else args.seed
-        replay_seed = (
-            seed
-            if args.seed is not None and args.replay_seed is None
-            else config.replay_seed
-        )
-        if args.replay_seed is not None:
-            replay_seed = args.replay_seed
-        run_name = args.run_name
-        if run_name is None and args.seed is not None:
-            run_name = f"learned_fixed_budget_replay_split_cifar100_seed{seed}_prior_random"
-        config = replace(
-            config,
-            seed=seed,
-            replay_seed=replay_seed,
-            run_name=config.run_name if run_name is None else run_name,
+    if args.seed is not None:
+        run_name = config.run_name
+        if "seed0" in run_name:
+            run_name = run_name.replace("seed0", f"seed{args.seed}")
+        elif f"seed{args.seed}" not in run_name:
+            run_name = f"{run_name}_seed{args.seed}"
+        config = ProposalSignalDiagnosticConfig(
+            **{
+                **config.__dict__,
+                "seed": int(args.seed),
+                "replay_seed": int(args.seed),
+                "run_name": run_name,
+            }
         )
     try:
-        run = run_learned_fixed_budget_replay(config)
+        run = run_proposal_signal_diagnostic(config)
     except BaselineDataUnavailableError as exc:
         print(f"Baseline data unavailable: {exc}", file=sys.stderr)
         return 2
-    print(f"Saved learned fixed-budget replay artifacts to: {run.artifacts.run_dir}")
+    print(f"Saved proposal signal diagnostic artifacts to: {run.artifacts.run_dir}")
     return 0
 
 

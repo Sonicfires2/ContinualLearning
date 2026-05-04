@@ -16,6 +16,13 @@ from src.signals.gradient_signals import (
     GradientSignalRow,
     last_layer_gradient_signal_tensors,
 )
+from src.signals.representation_signals import (
+    REPRESENTATION_SIGNAL_FIELDS,
+    REPRESENTATION_SIGNAL_SCHEMA_VERSION,
+    RepresentationDriftLogger,
+    RepresentationSignalRow,
+    representation_signal_tensors,
+)
 from src.signals.sample_signals import (
     SIGNAL_FIELDS,
     SIGNAL_SCHEMA_VERSION,
@@ -38,12 +45,16 @@ __all__ = [
     "GRADIENT_SIGNAL_SCHEMA_VERSION",
     "PRIMARY_FORGETTING_LABEL",
     "PRIMARY_TIME_TARGET",
+    "REPRESENTATION_SIGNAL_FIELDS",
+    "REPRESENTATION_SIGNAL_SCHEMA_VERSION",
     "SIGNAL_FIELDS",
     "SIGNAL_SCHEMA_VERSION",
     "TIME_TO_FORGETTING_SCHEMA_VERSION",
     "ForgettingLabelRow",
     "GradientSignalLogger",
     "GradientSignalRow",
+    "RepresentationDriftLogger",
+    "RepresentationSignalRow",
     "SampleSignalLogger",
     "SampleSignalRow",
     "TimeToForgettingRow",
@@ -52,6 +63,7 @@ __all__ = [
     "build_time_to_forgetting_artifact",
     "build_time_to_forgetting_artifact_from_path",
     "last_layer_gradient_signal_tensors",
+    "representation_signal_tensors",
     "save_forgetting_label_artifact",
     "save_time_to_forgetting_artifact",
     "summarize_forgetting_labels",

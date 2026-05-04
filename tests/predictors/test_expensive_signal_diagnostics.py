@@ -5,9 +5,12 @@ import json
 from src.predictors import (
     EXPENSIVE_SIGNAL_DIAGNOSTIC_SCHEMA_VERSION,
     augment_feature_rows_with_gradient_signals,
+    augment_feature_rows_with_representation_signals,
     build_expensive_signal_diagnostic_report,
     build_feature_rows,
+    build_proposal_signal_diagnostic_report,
     save_expensive_signal_diagnostic_report,
+    save_proposal_signal_diagnostic_report,
 )
 
 
@@ -75,6 +78,33 @@ def _gradient_row(*, sample_id, source_task_id, trained_task_id, high):
     }
 
 
+def _representation_row(*, sample_id, source_task_id, trained_task_id, high):
+    drift = 0.8 if high else 0.1
+    return {
+        "sample_id": sample_id,
+        "source_task_id": source_task_id,
+        "original_class_id": sample_id,
+        "within_task_label": 0,
+        "original_index": sample_id,
+        "split": "test",
+        "target": sample_id,
+        "observation_type": "seen_task_eval",
+        "trained_task_id": trained_task_id,
+        "evaluated_task_id": source_task_id,
+        "epoch": None,
+        "global_step": trained_task_id * 10,
+        "is_replay": False,
+        "predicted_class": sample_id,
+        "correct": True,
+        "representation_l2": 1.0 + drift,
+        "reference_representation_l2": 1.0,
+        "reference_trained_task_id": source_task_id,
+        "reference_global_step": source_task_id * 10,
+        "cosine_similarity_to_reference": 1.0 - drift,
+        "representation_drift": drift,
+    }
+
+
 def _label_row(
     *,
     sample_id,
@@ -124,6 +154,7 @@ def _label_row(
 def _payloads():
     signal_rows = []
     gradient_rows = []
+    representation_rows = []
     label_rows = []
     for task_id in range(4):
         for offset in range(4):
@@ -149,6 +180,14 @@ def _payloads():
                         high=high_risk,
                     )
                 )
+                representation_rows.append(
+                    _representation_row(
+                        sample_id=sample_id,
+                        source_task_id=0,
+                        trained_task_id=task_id - 1,
+                        high=high_risk,
+                    )
+                )
             signal_rows.append(
                 _signal_row(
                     sample_id=sample_id,
@@ -168,6 +207,14 @@ def _payloads():
                     high=high_risk,
                 )
             )
+            representation_rows.append(
+                _representation_row(
+                    sample_id=sample_id,
+                    source_task_id=0,
+                    trained_task_id=task_id,
+                    high=high_risk,
+                )
+            )
             label_rows.append(
                 _label_row(
                     sample_id=sample_id,
@@ -176,11 +223,16 @@ def _payloads():
                     forgot_any_future=high_risk,
                 )
             )
-    return {"rows": signal_rows}, {"rows": label_rows}, {"rows": gradient_rows}
+    return (
+        {"rows": signal_rows},
+        {"rows": label_rows},
+        {"rows": gradient_rows},
+        {"rows": representation_rows},
+    )
 
 
 def test_augment_feature_rows_with_gradient_signals_adds_anchor_fields():
-    signal_payload, label_payload, gradient_payload = _payloads()
+    signal_payload, label_payload, gradient_payload, _representation_payload = _payloads()
     rows = build_feature_rows(signal_payload=signal_payload, label_payload=label_payload)
 
     augmented = augment_feature_rows_with_gradient_signals(
@@ -193,8 +245,22 @@ def test_augment_feature_rows_with_gradient_signals_adds_anchor_fields():
     assert "last_layer_gradient_increase_from_previous" in augmented[0]
 
 
+def test_augment_feature_rows_with_representation_signals_adds_anchor_fields():
+    signal_payload, label_payload, _gradient_payload, representation_payload = _payloads()
+    rows = build_feature_rows(signal_payload=signal_payload, label_payload=label_payload)
+
+    augmented = augment_feature_rows_with_representation_signals(
+        feature_rows=rows,
+        representation_payload=representation_payload,
+    )
+
+    assert len(augmented) == len(rows)
+    assert "anchor_representation_drift" in augmented[0]
+    assert "representation_drift_increase_from_previous" in augmented[0]
+
+
 def test_expensive_signal_diagnostic_report_compares_gradient_group():
-    signal_payload, label_payload, gradient_payload = _payloads()
+    signal_payload, label_payload, gradient_payload, _representation_payload = _payloads()
 
     report = build_expensive_signal_diagnostic_report(
         signal_payload=signal_payload,
@@ -208,17 +274,41 @@ def test_expensive_signal_diagnostic_report_compares_gradient_group():
     assert "build_replay_intervention_next" in report["recommendation"]
 
 
+def test_proposal_signal_diagnostic_report_compares_four_proposal_groups():
+    signal_payload, label_payload, gradient_payload, representation_payload = _payloads()
+
+    report = build_proposal_signal_diagnostic_report(
+        signal_payload=signal_payload,
+        label_payload=label_payload,
+        gradient_payload=gradient_payload,
+        representation_payload=representation_payload,
+    )
+
+    assert report["schema_version"] == EXPENSIVE_SIGNAL_DIAGNOSTIC_SCHEMA_VERSION
+    assert report["feature_summary"]["proposal_augmented_row_count"] == 16
+    groups = report["ablation_report"]["feature_group_reports"]
+    assert set(groups) == {
+        "loss_trajectory",
+        "uncertainty",
+        "gradient_norm",
+        "representation_drift",
+    }
+    assert len(report["proposal_signal_comparison"]) == 4
+
+
 def test_save_expensive_signal_diagnostic_report_writes_json():
-    signal_payload, label_payload, gradient_payload = _payloads()
+    signal_payload, label_payload, gradient_payload, representation_payload = _payloads()
     tmp_path = Path(".tmp") / "test_expensive_signal_diagnostics" / uuid4().hex
     tmp_path.mkdir(parents=True, exist_ok=True)
     signal_path = tmp_path / "sample_signals.json"
     label_path = tmp_path / "forgetting_labels.json"
     gradient_path = tmp_path / "gradient_signals.json"
+    representation_path = tmp_path / "representation_signals.json"
     output_path = tmp_path / "expensive_signal_diagnostic_report.json"
     signal_path.write_text(json.dumps(signal_payload), encoding="utf-8")
     label_path.write_text(json.dumps(label_payload), encoding="utf-8")
     gradient_path.write_text(json.dumps(gradient_payload), encoding="utf-8")
+    representation_path.write_text(json.dumps(representation_payload), encoding="utf-8")
 
     report = save_expensive_signal_diagnostic_report(
         signal_path=signal_path,
@@ -229,3 +319,17 @@ def test_save_expensive_signal_diagnostic_report_writes_json():
 
     assert output_path.exists()
     assert report["source_gradient_artifact"]["path"] == str(gradient_path)
+
+    proposal_output_path = tmp_path / "proposal_signal_diagnostic_report.json"
+    proposal_report = save_proposal_signal_diagnostic_report(
+        signal_path=signal_path,
+        label_path=label_path,
+        gradient_path=gradient_path,
+        representation_path=representation_path,
+        output_path=proposal_output_path,
+    )
+
+    assert proposal_output_path.exists()
+    assert proposal_report["source_representation_artifact"]["path"] == str(
+        representation_path
+    )

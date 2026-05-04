@@ -26,7 +26,12 @@ from src.baselines.fine_tuning import (
 from src.experiment_tracking import ArtifactPaths, ExperimentRunConfig, save_experiment_artifacts
 from src.models import build_mlp, count_parameters
 from src.replay import ReservoirReplayBuffer
-from src.signals import GradientSignalLogger, SIGNAL_FIELDS, SampleSignalLogger
+from src.signals import (
+    GradientSignalLogger,
+    RepresentationDriftLogger,
+    SIGNAL_FIELDS,
+    SampleSignalLogger,
+)
 from src.training import ContinualTrainerConfig, ContinualTrainingResult, evaluate_task_accuracy
 
 
@@ -170,6 +175,7 @@ def _train_random_replay(
     replay_batch_size: int,
     signal_logger: SampleSignalLogger | None = None,
     gradient_signal_logger: GradientSignalLogger | None = None,
+    representation_signal_logger: RepresentationDriftLogger | None = None,
 ) -> ContinualTrainingResult:
     if replay_batch_size < 1:
         raise ValueError("replay_batch_size must be positive")
@@ -281,6 +287,7 @@ def _train_random_replay(
                 device=device,
                 signal_logger=signal_logger,
                 gradient_signal_logger=gradient_signal_logger,
+                representation_signal_logger=representation_signal_logger,
                 trained_task_id=task_id,
                 evaluated_task_id=eval_task_id,
                 global_step=global_step,

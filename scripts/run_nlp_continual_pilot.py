@@ -59,6 +59,24 @@ class MemoryState:
     last_loss: float | None = None
     replay_count: int = 0
     last_replay_step: int | None = None
+    representation_reference: torch.Tensor | None = None
+    representation_reference_l2: float | None = None
+    representation_reference_step: int | None = None
+    representation_reference_task_id: int | None = None
+    representation_drift_score: float = 0.0
+    representation_risk_score: float = 0.0
+    representation_next_due_step: int | None = None
+    representation_due_step_before_update: int | None = None
+    representation_last_scored_step: int | None = None
+    representation_score_count: int = 0
+
+
+@dataclass
+class RepresentationReference:
+    vector: torch.Tensor
+    trained_task_id: int
+    global_step: int
+    l2: float
 
 
 @dataclass(frozen=True)
@@ -70,6 +88,14 @@ class MethodResult:
     replay_samples: int
     training_time_seconds: float
     accuracy_matrix: AccuracyMatrix
+
+
+DRIFT_REPLAY_METHODS = {
+    "representation_drift_replay": "drift_due_time",
+    "drift_ranked_replay": "drift_ranked",
+    "drift_due_time_replay": "drift_due_time",
+    "drift_hybrid_replay": "drift_hybrid",
+}
 
 
 def _set_repo_local_caches() -> None:
@@ -221,6 +247,19 @@ def _move_batch_to_device(batch: dict[str, Any], device: torch.device) -> dict[s
     }
 
 
+def _cosine_similarity(first: torch.Tensor, second: torch.Tensor) -> float:
+    first_norm = torch.linalg.vector_norm(first, ord=2)
+    second_norm = torch.linalg.vector_norm(second, ord=2)
+    first_norm_value = float(first_norm.item())
+    second_norm_value = float(second_norm.item())
+    if first_norm_value == 0.0 and second_norm_value == 0.0:
+        return 1.0
+    if first_norm_value == 0.0 or second_norm_value == 0.0:
+        return 0.0
+    similarity = torch.dot(first, second) / (first_norm * second_norm)
+    return max(-1.0, min(1.0, float(similarity.item())))
+
+
 def _risk_from_observation(
     *,
     loss: float,
@@ -254,6 +293,10 @@ def _estimated_time_from_risk(
     return int(round(max_interval_steps - risk_score * span))
 
 
+def _stable_method_offset(method: str) -> int:
+    return sum((index + 1) * ord(character) for index, character in enumerate(method)) % 100_000
+
+
 def _select_replay_examples(
     *,
     method: str,
@@ -268,6 +311,17 @@ def _select_replay_examples(
     if method == "random_replay":
         count = min(replay_batch_size, len(memory))
         return rng.sample(memory, count)
+    if method in {"risk_ranked_replay", "learned_risk_replay"}:
+        records = [(example, memory_state[example.sample_id]) for example in memory]
+        records.sort(
+            key=lambda record: (
+                -record[1].risk_score,
+                record[1].replay_count,
+                record[1].next_due_step,
+                record[0].sample_id,
+            )
+        )
+        return [record[0] for record in records[: min(replay_batch_size, len(records))]]
     if method == "spaced_replay":
         records = []
         for example in memory:
@@ -285,6 +339,543 @@ def _select_replay_examples(
         )
         return [record[0] for record in records[: min(replay_batch_size, len(records))]]
     raise ValueError(f"Unsupported method: {method}")
+
+
+def _clamp_probability(value: float) -> float:
+    return min(max(float(value), 0.0), 1.0)
+
+
+def _drift_variant_for_method(method: str, config: dict[str, Any]) -> str:
+    if method == "representation_drift_replay":
+        drift_config = config.get("representation_drift_replay", {})
+        return str(drift_config.get("drift_variant", "drift_due_time"))
+    return DRIFT_REPLAY_METHODS[method]
+
+
+@torch.no_grad()
+def _representations_for_text_examples(
+    *,
+    model: nn.Module,
+    examples: list[EncodedTextExample],
+    batch_size: int,
+    device: torch.device,
+    use_amp: bool,
+) -> dict[int, tuple[torch.Tensor, float]]:
+    was_training = model.training
+    model.eval()
+    representations: dict[int, tuple[torch.Tensor, float]] = {}
+    for start in range(0, len(examples), batch_size):
+        batch_examples = examples[start : start + batch_size]
+        batch = _collate_text_examples(batch_examples)
+        device_batch = _move_batch_to_device(batch, device)
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            outputs = model(**device_batch, output_hidden_states=True)
+        reps = outputs.hidden_states[-1][:, 0, :].detach().float().cpu()
+        rep_l2 = torch.linalg.vector_norm(reps, ord=2, dim=1)
+        for example, vector, l2_value in zip(batch_examples, reps, rep_l2):
+            representations[example.sample_id] = (
+                vector.clone(),
+                float(l2_value.item()),
+            )
+    model.train(was_training)
+    return representations
+
+
+def _ensure_representation_memory_references(
+    *,
+    model: nn.Module,
+    memory: list[EncodedTextExample],
+    memory_state: dict[int, MemoryState],
+    batch_size: int,
+    device: torch.device,
+    use_amp: bool,
+    global_step: int,
+    task_id: int,
+) -> None:
+    missing = [
+        example
+        for example in memory
+        if memory_state[example.sample_id].representation_reference is None
+    ]
+    if not missing:
+        return
+    representations = _representations_for_text_examples(
+        model=model,
+        examples=missing,
+        batch_size=batch_size,
+        device=device,
+        use_amp=use_amp,
+    )
+    for example in missing:
+        vector, l2_value = representations[example.sample_id]
+        state = memory_state[example.sample_id]
+        state.representation_reference = vector
+        state.representation_reference_l2 = l2_value
+        state.representation_reference_step = int(global_step)
+        state.representation_reference_task_id = int(task_id)
+        if state.representation_next_due_step is None:
+            state.representation_next_due_step = int(state.next_due_step)
+        if state.representation_due_step_before_update is None:
+            state.representation_due_step_before_update = int(state.next_due_step)
+
+
+def _score_representation_drift_candidates(
+    *,
+    model: nn.Module,
+    candidates: list[EncodedTextExample],
+    memory_state: dict[int, MemoryState],
+    global_step: int,
+    batch_size: int,
+    device: torch.device,
+    use_amp: bool,
+    drift_scale: float,
+    min_interval_steps: int,
+    max_interval_steps: int,
+) -> list[tuple[EncodedTextExample, MemoryState]]:
+    if drift_scale <= 0:
+        raise ValueError("representation_drift_replay.drift_scale must be positive")
+    representations = _representations_for_text_examples(
+        model=model,
+        examples=candidates,
+        batch_size=batch_size,
+        device=device,
+        use_amp=use_amp,
+    )
+    scored: list[tuple[EncodedTextExample, MemoryState]] = []
+    for example in candidates:
+        state = memory_state[example.sample_id]
+        if state.representation_reference is None:
+            raise ValueError("missing representation reference for memory example")
+        current_vector, _current_l2 = representations[example.sample_id]
+        drift = 1.0 - _cosine_similarity(current_vector, state.representation_reference)
+        risk = _clamp_probability(drift / drift_scale)
+        interval = _estimated_time_from_risk(
+            risk_score=risk,
+            min_interval_steps=min_interval_steps,
+            max_interval_steps=max_interval_steps,
+        )
+        previous_due_step = (
+            state.representation_next_due_step
+            if state.representation_next_due_step is not None
+            else state.next_due_step
+        )
+        state.representation_drift_score = float(drift)
+        state.representation_risk_score = float(risk)
+        state.representation_due_step_before_update = int(previous_due_step)
+        state.representation_next_due_step = int(global_step + interval)
+        state.representation_last_scored_step = int(global_step)
+        state.representation_score_count += 1
+        scored.append((example, state))
+    return scored
+
+
+def _select_class_balanced_text_examples(
+    *,
+    memory: list[EncodedTextExample],
+    excluded_sample_ids: set[int],
+    quota: int,
+    rng: random.Random,
+) -> list[EncodedTextExample]:
+    candidates = [
+        example for example in memory if example.sample_id not in excluded_sample_ids
+    ]
+    if quota <= 0 or not candidates:
+        return []
+    by_class: dict[int, list[EncodedTextExample]] = {}
+    for example in candidates:
+        by_class.setdefault(example.original_class_id, []).append(example)
+    for examples in by_class.values():
+        rng.shuffle(examples)
+    class_ids = list(by_class)
+    rng.shuffle(class_ids)
+    selected: list[EncodedTextExample] = []
+    offsets = {class_id: 0 for class_id in class_ids}
+    while len(selected) < quota and class_ids:
+        for class_id in list(class_ids):
+            offset = offsets[class_id]
+            examples = by_class[class_id]
+            if offset >= len(examples):
+                class_ids.remove(class_id)
+                continue
+            selected.append(examples[offset])
+            offsets[class_id] = offset + 1
+            if len(selected) >= quota:
+                break
+    return selected
+
+
+def _select_random_text_examples(
+    *,
+    memory: list[EncodedTextExample],
+    excluded_sample_ids: set[int],
+    quota: int,
+    rng: random.Random,
+) -> list[EncodedTextExample]:
+    candidates = [
+        example for example in memory if example.sample_id not in excluded_sample_ids
+    ]
+    if quota <= 0 or not candidates:
+        return []
+    return rng.sample(candidates, min(quota, len(candidates)))
+
+
+def _representation_drift_selection_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    reason_counts: dict[str, int] = {}
+    drift_values = []
+    risk_values = []
+    for row in rows:
+        reason = str(row["selection_reason"])
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        drift_values.append(float(row["drift_score"]))
+        risk_values.append(float(row["risk_score"]))
+    return {
+        "trace_row_count": len(rows),
+        "selection_reason_counts": reason_counts,
+        "mean_selected_drift_score": (
+            sum(drift_values) / len(drift_values) if drift_values else None
+        ),
+        "mean_selected_risk_score": (
+            sum(risk_values) / len(risk_values) if risk_values else None
+        ),
+        "max_selected_drift_score": max(drift_values) if drift_values else None,
+    }
+
+
+def _select_representation_drift_replay_examples(
+    *,
+    method: str,
+    config: dict[str, Any],
+    model: nn.Module,
+    memory: list[EncodedTextExample],
+    memory_state: dict[int, MemoryState],
+    replay_batch_size: int,
+    global_step: int,
+    current_task_id: int,
+    device: torch.device,
+    use_amp: bool,
+    rng: random.Random,
+) -> tuple[list[EncodedTextExample], list[dict[str, Any]]]:
+    if not memory or replay_batch_size <= 0:
+        return [], []
+
+    drift_config = config.get("representation_drift_replay", {})
+    variant = _drift_variant_for_method(method, config)
+    candidate_count = int(drift_config.get("candidate_count", 64))
+    scoring_batch_size = int(drift_config.get("scoring_batch_size", 64))
+    drift_scale = float(drift_config.get("drift_scale", 1.0))
+    min_interval_steps = int(
+        drift_config.get(
+            "min_interval_steps",
+            config["spaced_replay"]["min_interval_steps"],
+        )
+    )
+    max_interval_steps = int(
+        drift_config.get(
+            "max_interval_steps",
+            config["spaced_replay"]["max_interval_steps"],
+        )
+    )
+    hybrid_fraction = float(drift_config.get("hybrid_fraction", 0.5))
+    hybrid_diversity_mode = str(drift_config.get("hybrid_diversity_mode", "class_balanced"))
+
+    _ensure_representation_memory_references(
+        model=model,
+        memory=memory,
+        memory_state=memory_state,
+        batch_size=scoring_batch_size,
+        device=device,
+        use_amp=use_amp,
+        global_step=global_step,
+        task_id=current_task_id,
+    )
+    candidate_total = min(max(candidate_count, replay_batch_size), len(memory))
+    candidates = (
+        list(memory)
+        if candidate_total == len(memory)
+        else rng.sample(memory, candidate_total)
+    )
+    scored = _score_representation_drift_candidates(
+        model=model,
+        candidates=candidates,
+        memory_state=memory_state,
+        global_step=global_step,
+        batch_size=scoring_batch_size,
+        device=device,
+        use_amp=use_amp,
+        drift_scale=drift_scale,
+        min_interval_steps=min_interval_steps,
+        max_interval_steps=max_interval_steps,
+    )
+    scored_ids = {example.sample_id for example, _state in scored}
+    target_count = min(replay_batch_size, len(memory))
+
+    if variant == "drift_ranked":
+        selected_records = sorted(
+            scored,
+            key=lambda record: (
+                -record[1].representation_risk_score,
+                -record[1].representation_drift_score,
+                record[1].replay_count,
+                record[0].sample_id,
+            ),
+        )[:target_count]
+        selected = [example for example, _state in selected_records]
+        selection_reasons = {example.sample_id: "drift_ranked" for example in selected}
+    elif variant == "drift_due_time":
+        selected_records = sorted(
+            scored,
+            key=lambda record: (
+                int(
+                    global_step
+                    < (
+                        record[1].representation_due_step_before_update
+                        if record[1].representation_due_step_before_update is not None
+                        else record[1].next_due_step
+                    )
+                ),
+                -(
+                    global_step
+                    - (
+                        record[1].representation_due_step_before_update
+                        if record[1].representation_due_step_before_update is not None
+                        else record[1].next_due_step
+                    )
+                ),
+                -record[1].representation_risk_score,
+                (
+                    record[1].representation_due_step_before_update
+                    if record[1].representation_due_step_before_update is not None
+                    else record[1].next_due_step
+                ),
+                record[0].sample_id,
+            ),
+        )[:target_count]
+        selected = [example for example, _state in selected_records]
+        selection_reasons = {}
+        for example, state in selected_records:
+            due_step = (
+                state.representation_due_step_before_update
+                if state.representation_due_step_before_update is not None
+                else state.next_due_step
+            )
+            selection_reasons[example.sample_id] = (
+                "due" if global_step >= due_step else "budget_fill_near_due"
+            )
+    elif variant == "drift_hybrid":
+        if not 0.0 <= hybrid_fraction <= 1.0:
+            raise ValueError("representation_drift_replay.hybrid_fraction must be in [0, 1]")
+        drift_quota = min(target_count, int(round(target_count * hybrid_fraction)))
+        diversity_quota = target_count - drift_quota
+        selected_records = sorted(
+            scored,
+            key=lambda record: (
+                -record[1].representation_risk_score,
+                -record[1].representation_drift_score,
+                record[1].replay_count,
+                record[0].sample_id,
+            ),
+        )[:drift_quota]
+        selected = [example for example, _state in selected_records]
+        selected_ids = {example.sample_id for example in selected}
+        if hybrid_diversity_mode == "class_balanced":
+            diversity_examples = _select_class_balanced_text_examples(
+                memory=memory,
+                excluded_sample_ids=selected_ids,
+                quota=diversity_quota,
+                rng=rng,
+            )
+        elif hybrid_diversity_mode == "random":
+            diversity_examples = _select_random_text_examples(
+                memory=memory,
+                excluded_sample_ids=selected_ids,
+                quota=diversity_quota,
+                rng=rng,
+            )
+        else:
+            raise ValueError(
+                "representation_drift_replay.hybrid_diversity_mode must be "
+                "class_balanced or random"
+            )
+        selected.extend(diversity_examples)
+        selected_ids.update(example.sample_id for example in diversity_examples)
+        if len(selected) < target_count:
+            selected.extend(
+                _select_random_text_examples(
+                    memory=memory,
+                    excluded_sample_ids=selected_ids,
+                    quota=target_count - len(selected),
+                    rng=rng,
+                )
+            )
+        selection_reasons = {
+            example.sample_id: "drift_ranked"
+            for example, _state in selected_records
+        }
+        selection_reasons.update(
+            {
+                example.sample_id: f"diversity_{hybrid_diversity_mode}"
+                for example in diversity_examples
+            }
+        )
+    else:
+        raise ValueError(
+            "representation drift variant must be drift_ranked, drift_due_time, "
+            "or drift_hybrid"
+        )
+
+    unscored_selected = [
+        example for example in selected if example.sample_id not in scored_ids
+    ]
+    if unscored_selected:
+        _score_representation_drift_candidates(
+            model=model,
+            candidates=unscored_selected,
+            memory_state=memory_state,
+            global_step=global_step,
+            batch_size=scoring_batch_size,
+            device=device,
+            use_amp=use_amp,
+            drift_scale=drift_scale,
+            min_interval_steps=min_interval_steps,
+            max_interval_steps=max_interval_steps,
+        )
+
+    trace_rows = []
+    for example in selected:
+        state = memory_state[example.sample_id]
+        due_step = (
+            state.representation_due_step_before_update
+            if state.representation_due_step_before_update is not None
+            else state.next_due_step
+        )
+        trace_rows.append(
+            {
+                "global_step": int(global_step),
+                "method": method,
+                "variant": variant,
+                "sample_id": int(example.sample_id),
+                "task_id": int(example.task_id),
+                "original_class_id": int(example.original_class_id),
+                "drift_score": float(state.representation_drift_score),
+                "risk_score": float(state.representation_risk_score),
+                "next_due_step": int(
+                    state.representation_next_due_step
+                    if state.representation_next_due_step is not None
+                    else state.next_due_step
+                ),
+                "due_step_before_update": int(due_step),
+                "overdue_steps": int(max(0, global_step - due_step)),
+                "selection_reason": selection_reasons.get(
+                    example.sample_id,
+                    "fallback_random",
+                ),
+            }
+        )
+    return selected, trace_rows
+
+
+@torch.no_grad()
+def _candidate_losses(
+    *,
+    model: nn.Module,
+    examples: list[EncodedTextExample],
+    batch_size: int,
+    device: torch.device,
+    use_amp: bool,
+) -> list[float]:
+    was_training = model.training
+    model.eval()
+    losses: list[float] = []
+    for start in range(0, len(examples), batch_size):
+        batch_examples = examples[start : start + batch_size]
+        batch = _collate_text_examples(batch_examples)
+        device_batch = _move_batch_to_device(batch, device)
+        with torch.amp.autocast("cuda", enabled=use_amp):
+            outputs = model(**device_batch)
+            batch_losses = F.cross_entropy(
+                outputs.logits,
+                device_batch["labels"],
+                reduction="none",
+            )
+        losses.extend(float(value) for value in batch_losses.detach().float().cpu().tolist())
+    model.train(was_training)
+    return losses
+
+
+def _select_mir_replay_examples(
+    *,
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    current_batch: dict[str, Any],
+    memory: list[EncodedTextExample],
+    replay_batch_size: int,
+    candidate_count: int,
+    scoring_batch_size: int,
+    virtual_learning_rate: float,
+    device: torch.device,
+    use_amp: bool,
+    rng: random.Random,
+) -> list[EncodedTextExample]:
+    if not memory or replay_batch_size <= 0:
+        return []
+
+    candidate_total = min(max(candidate_count, replay_batch_size), len(memory))
+    if candidate_total == len(memory):
+        candidates = list(memory)
+    else:
+        candidates = rng.sample(memory, candidate_total)
+
+    before_losses = _candidate_losses(
+        model=model,
+        examples=candidates,
+        batch_size=scoring_batch_size,
+        device=device,
+        use_amp=use_amp,
+    )
+
+    was_training = model.training
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    device_current_batch = _move_batch_to_device(current_batch, device)
+    with torch.amp.autocast("cuda", enabled=use_amp):
+        outputs = model(**device_current_batch)
+        current_loss = F.cross_entropy(outputs.logits, device_current_batch["labels"])
+    current_loss.backward()
+
+    saved_parameters: list[tuple[torch.nn.Parameter, torch.Tensor]] = []
+    with torch.no_grad():
+        for parameter in model.parameters():
+            if parameter.grad is None:
+                continue
+            saved_parameters.append((parameter, parameter.detach().clone()))
+            parameter.add_(parameter.grad, alpha=-virtual_learning_rate)
+    optimizer.zero_grad(set_to_none=True)
+
+    after_losses = _candidate_losses(
+        model=model,
+        examples=candidates,
+        batch_size=scoring_batch_size,
+        device=device,
+        use_amp=use_amp,
+    )
+
+    with torch.no_grad():
+        for parameter, saved_value in saved_parameters:
+            parameter.copy_(saved_value)
+    optimizer.zero_grad(set_to_none=True)
+    model.train(was_training)
+
+    scored_examples = [
+        (after_loss - before_loss, after_loss, example)
+        for example, before_loss, after_loss in zip(candidates, before_losses, after_losses)
+    ]
+    scored_examples.sort(
+        key=lambda record: (-record[0], -record[1], record[2].sample_id)
+    )
+    return [
+        record[2]
+        for record in scored_examples[: min(replay_batch_size, len(scored_examples))]
+    ]
 
 
 def _add_to_memory(
@@ -335,7 +926,11 @@ def _evaluate_task(
     eval_task_id: int,
     global_step: int,
     num_workers: int,
+    log_representation_drift: bool = False,
+    representation_references: dict[int, RepresentationReference] | None = None,
 ) -> tuple[float, list[dict[str, Any]]]:
+    if log_representation_drift and representation_references is None:
+        raise ValueError("representation_references is required when logging drift")
     loader = DataLoader(
         examples,
         batch_size=batch_size,
@@ -349,7 +944,10 @@ def _evaluate_task(
     signal_rows: list[dict[str, Any]] = []
     for batch in loader:
         device_batch = _move_batch_to_device(batch, device)
-        outputs = model(**device_batch)
+        outputs = model(
+            **device_batch,
+            output_hidden_states=log_representation_drift,
+        )
         logits = outputs.logits
         labels = device_batch["labels"]
         losses = F.cross_entropy(logits, labels, reduction="none")
@@ -361,25 +959,56 @@ def _evaluate_task(
             labels.unsqueeze(1),
         ).squeeze(1)
         correct = predictions.eq(labels)
+        representations = None
+        representation_l2 = None
+        if log_representation_drift:
+            representations = outputs.hidden_states[-1][:, 0, :].detach().float().cpu()
+            representation_l2 = torch.linalg.vector_norm(representations, ord=2, dim=1)
         correct_count += int(correct.sum().item())
         total_count += int(labels.numel())
         for index, sample_id in enumerate(batch["sample_ids"]):
-            signal_rows.append(
-                {
-                    "global_step": int(global_step),
-                    "trained_task_id": int(trained_task_id),
-                    "eval_task_id": int(eval_task_id),
-                    "sample_id": int(sample_id),
-                    "task_id": int(batch["task_ids"][index]),
-                    "original_class_id": int(batch["class_ids"][index]),
-                    "label": int(labels[index].item()),
-                    "loss": float(losses[index].item()),
-                    "predicted_label": int(predictions[index].item()),
-                    "confidence": float(confidence[index].item()),
-                    "target_probability": float(target_probabilities[index].item()),
-                    "correct": bool(correct[index].item()),
-                }
-            )
+            row = {
+                "global_step": int(global_step),
+                "trained_task_id": int(trained_task_id),
+                "eval_task_id": int(eval_task_id),
+                "sample_id": int(sample_id),
+                "task_id": int(batch["task_ids"][index]),
+                "original_class_id": int(batch["class_ids"][index]),
+                "label": int(labels[index].item()),
+                "loss": float(losses[index].item()),
+                "predicted_label": int(predictions[index].item()),
+                "confidence": float(confidence[index].item()),
+                "target_probability": float(target_probabilities[index].item()),
+                "correct": bool(correct[index].item()),
+            }
+            if log_representation_drift:
+                assert representations is not None
+                assert representation_l2 is not None
+                assert representation_references is not None
+                sample_id_int = int(sample_id)
+                current_vector = representations[index].clone()
+                current_l2 = float(representation_l2[index].item())
+                if sample_id_int not in representation_references:
+                    representation_references[sample_id_int] = RepresentationReference(
+                        vector=current_vector,
+                        trained_task_id=int(trained_task_id),
+                        global_step=int(global_step),
+                        l2=current_l2,
+                    )
+                reference = representation_references[sample_id_int]
+                similarity = _cosine_similarity(current_vector, reference.vector)
+                row.update(
+                    {
+                        "representation_scope": "distilbert_last_hidden_cls",
+                        "representation_l2": current_l2,
+                        "reference_representation_l2": reference.l2,
+                        "reference_trained_task_id": reference.trained_task_id,
+                        "reference_global_step": reference.global_step,
+                        "cosine_similarity_to_reference": similarity,
+                        "representation_drift": 1.0 - similarity,
+                    }
+                )
+            signal_rows.append(row)
     if total_count == 0:
         raise ValueError("Cannot evaluate an empty task")
     return correct_count / total_count, signal_rows
@@ -473,9 +1102,10 @@ def _run_method(
 ) -> MethodResult:
     trainer_config = config["trainer"]
     spaced_config = config["spaced_replay"]
+    mir_config = config.get("mir_replay", {})
     seed = int(trainer_config["seed"])
     _seed_everything(seed)
-    rng = random.Random(seed + hash(method) % 100_000)
+    rng = random.Random(seed + _stable_method_offset(method))
     model = AutoModelForSequenceClassification.from_pretrained(
         config["model"]["name"],
         num_labels=len(config["dataset"]["class_order"]),
@@ -497,6 +1127,9 @@ def _run_method(
     global_step = 0
     train_losses: list[float] = []
     eval_signal_rows: list[dict[str, Any]] = []
+    scheduler_trace_rows: list[dict[str, Any]] = []
+    log_representation_drift = bool(trainer_config.get("log_representation_drift", False))
+    representation_references: dict[int, RepresentationReference] = {}
     accuracy_matrix: AccuracyMatrix = [
         [None for _ in range(len(train_tasks))]
         for _ in range(len(train_tasks))
@@ -517,14 +1150,57 @@ def _run_method(
         for _epoch in range(int(trainer_config["epochs_per_task"])):
             model.train()
             for batch in loader:
-                replay_examples = _select_replay_examples(
-                    method=method,
-                    memory=memory,
-                    memory_state=memory_state,
-                    replay_batch_size=int(trainer_config["replay_batch_size"]),
-                    global_step=global_step,
-                    rng=rng,
-                )
+                if method == "mir_replay":
+                    replay_examples = _select_mir_replay_examples(
+                        model=model,
+                        optimizer=optimizer,
+                        current_batch=batch,
+                        memory=memory,
+                        replay_batch_size=int(trainer_config["replay_batch_size"]),
+                        candidate_count=int(
+                            mir_config.get(
+                                "candidate_count",
+                                int(trainer_config["replay_batch_size"]) * 4,
+                            )
+                        ),
+                        scoring_batch_size=int(
+                            mir_config.get(
+                                "scoring_batch_size",
+                                int(trainer_config["batch_size"]),
+                            )
+                        ),
+                        virtual_learning_rate=float(trainer_config["learning_rate"])
+                        * float(mir_config.get("virtual_step_scale", 1.0)),
+                        device=device,
+                        use_amp=use_amp,
+                        rng=rng,
+                    )
+                elif method in DRIFT_REPLAY_METHODS:
+                    replay_examples, drift_trace_rows = (
+                        _select_representation_drift_replay_examples(
+                            method=method,
+                            config=config,
+                            model=model,
+                            memory=memory,
+                            memory_state=memory_state,
+                            replay_batch_size=int(trainer_config["replay_batch_size"]),
+                            global_step=global_step,
+                            current_task_id=task_id,
+                            device=device,
+                            use_amp=use_amp,
+                            rng=rng,
+                        )
+                    )
+                    scheduler_trace_rows.extend(drift_trace_rows)
+                else:
+                    replay_examples = _select_replay_examples(
+                        method=method,
+                        memory=memory,
+                        memory_state=memory_state,
+                        replay_batch_size=int(trainer_config["replay_batch_size"]),
+                        global_step=global_step,
+                        rng=rng,
+                    )
                 replay_batch = (
                     _collate_text_examples(replay_examples)
                     if replay_examples
@@ -606,6 +1282,18 @@ def _run_method(
             max_interval_steps=int(spaced_config["max_interval_steps"]),
             rng=rng,
         )
+        if method in DRIFT_REPLAY_METHODS:
+            drift_config = config.get("representation_drift_replay", {})
+            _ensure_representation_memory_references(
+                model=model,
+                memory=memory,
+                memory_state=memory_state,
+                batch_size=int(drift_config.get("scoring_batch_size", 64)),
+                device=device,
+                use_amp=use_amp,
+                global_step=global_step,
+                task_id=task_id,
+            )
 
         for eval_task_id in range(task_id + 1):
             accuracy, signal_rows = _evaluate_task(
@@ -617,6 +1305,8 @@ def _run_method(
                 eval_task_id=eval_task_id,
                 global_step=global_step,
                 num_workers=int(trainer_config.get("num_workers", 0)),
+                log_representation_drift=log_representation_drift,
+                representation_references=representation_references,
             )
             accuracy_matrix[task_id][eval_task_id] = accuracy
             eval_signal_rows.extend(signal_rows)
@@ -640,6 +1330,32 @@ def _run_method(
         "memory_size": len(memory),
         "global_steps": global_step,
         "task_metadata": task_metadata,
+        "mir_config": mir_config if method == "mir_replay" else None,
+        "representation_drift": (
+            {
+                "enabled": True,
+                "scope": "distilbert_last_hidden_cls",
+                "reference_rule": "first observed evaluation representation for each sample",
+                "reference_count": len(representation_references),
+            }
+            if log_representation_drift
+            else {"enabled": False}
+        ),
+        "representation_drift_scheduler": (
+            {
+                "enabled": True,
+                "variant": _drift_variant_for_method(method, config),
+                "candidate_count": int(
+                    config.get("representation_drift_replay", {}).get(
+                        "candidate_count",
+                        64,
+                    )
+                ),
+                **_representation_drift_selection_summary(scheduler_trace_rows),
+            }
+            if method in DRIFT_REPLAY_METHODS
+            else {"enabled": False}
+        ),
     }
     run_dir = output_root / method / f"{method}_seed{seed}_dbpedia14_speed_pilot"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -648,6 +1364,16 @@ def _run_method(
     _write_json(run_dir / "accuracy_matrix.json", {"accuracy_matrix": accuracy_matrix})
     _write_json(run_dir / "train_losses.json", {"train_losses": train_losses})
     _write_json(run_dir / "eval_signals.json", {"rows": eval_signal_rows})
+    if method in DRIFT_REPLAY_METHODS:
+        _write_json(
+            run_dir / "scheduler_trace.json",
+            {
+                "schema_version": 1,
+                "method": method,
+                "variant": _drift_variant_for_method(method, config),
+                "rows": scheduler_trace_rows,
+            },
+        )
     _write_json(
         run_dir / "environment.json",
         {
@@ -750,6 +1476,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--train-examples-per-class", type=int, default=None)
     parser.add_argument("--eval-examples-per-class", type=int, default=None)
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Optional trainer seed override.",
+    )
     return parser.parse_args()
 
 
@@ -757,6 +1489,8 @@ def main() -> None:
     _set_repo_local_caches()
     args = parse_args()
     config = _read_config(args.config)
+    if args.seed is not None:
+        config["trainer"]["seed"] = args.seed
     if args.train_examples_per_class is not None:
         config["dataset"]["train_examples_per_class"] = args.train_examples_per_class
     if args.eval_examples_per_class is not None:

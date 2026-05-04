@@ -16,7 +16,7 @@ from src.predictors.forgetting_risk import (
     build_feature_rows,
     sha256_file,
 )
-from src.predictors.signal_ablations import evaluate_signal_ablations
+from src.predictors.signal_ablations import SIGNAL_FEATURE_GROUPS, evaluate_signal_ablations
 
 
 EXPENSIVE_SIGNAL_DIAGNOSTIC_SCHEMA_VERSION = 1
@@ -31,10 +31,23 @@ GRADIENT_FEATURE_COLUMNS = (
     "last_layer_gradient_increase_from_previous",
     "max_last_layer_gradient_l2_so_far",
 )
+REPRESENTATION_DRIFT_FEATURE_COLUMNS = (
+    "anchor_representation_drift",
+    "previous_representation_drift",
+    "representation_drift_delta_from_previous",
+    "representation_drift_increase_from_previous",
+    "max_representation_drift_so_far",
+)
 EXPENSIVE_SIGNAL_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
     "cheap_all_features": FEATURE_COLUMNS,
     "gradient_only": GRADIENT_FEATURE_COLUMNS,
     "cheap_plus_gradient": FEATURE_COLUMNS + GRADIENT_FEATURE_COLUMNS,
+}
+PROPOSAL_SIGNAL_FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
+    "loss_trajectory": SIGNAL_FEATURE_GROUPS["loss_only"],
+    "uncertainty": SIGNAL_FEATURE_GROUPS["uncertainty_only"],
+    "gradient_norm": GRADIENT_FEATURE_COLUMNS,
+    "representation_drift": REPRESENTATION_DRIFT_FEATURE_COLUMNS,
 }
 
 
@@ -201,6 +214,121 @@ def augment_feature_rows_with_gradient_signals(
     return augmented_rows
 
 
+def _representation_history(
+    representation_payload: dict[str, Any],
+) -> dict[int, list[dict[str, Any]]]:
+    rows = representation_payload.get("rows")
+    if not isinstance(rows, list):
+        raise ValueError("representation payload must contain rows")
+    grouped: dict[int, list[dict[str, Any]]] = {}
+    for row in rows:
+        if row.get("observation_type") != "seen_task_eval":
+            continue
+        grouped.setdefault(_as_int(row, "sample_id"), []).append(row)
+    for sample_rows in grouped.values():
+        sample_rows.sort(
+            key=lambda row: (
+                _as_int(row, "trained_task_id"),
+                _as_int(row, "global_step"),
+            )
+        )
+    return grouped
+
+
+def _find_representation_anchor(
+    *,
+    feature_row: dict[str, Any],
+    sample_history: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    anchor_task = _as_int(feature_row, "anchor_trained_task_id")
+    anchor_step = _as_int(feature_row, "anchor_global_step")
+    source_task = _as_int(feature_row, "source_task_id")
+    history = [
+        row
+        for row in sample_history
+        if (
+            _as_int(row, "trained_task_id") < anchor_task
+            or (
+                _as_int(row, "trained_task_id") == anchor_task
+                and _as_int(row, "global_step") <= anchor_step
+            )
+        )
+    ]
+    matches = [
+        row
+        for row in history
+        if _as_int(row, "trained_task_id") == anchor_task
+        and _as_int(row, "global_step") == anchor_step
+        and _as_int(row, "evaluated_task_id") == source_task
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "could not uniquely match representation anchor for "
+            f"sample_id={feature_row.get('sample_id')!r}, "
+            f"anchor_task={anchor_task}, anchor_step={anchor_step}"
+        )
+    return matches[0], history
+
+
+def augment_feature_rows_with_representation_signals(
+    *,
+    feature_rows: list[dict[str, Any]],
+    representation_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Join representation-drift history onto leakage-safe feature rows."""
+
+    histories = _representation_history(representation_payload)
+    augmented_rows = []
+    for feature_row in feature_rows:
+        sample_id = _as_int(feature_row, "sample_id")
+        if sample_id not in histories:
+            continue
+        anchor, history = _find_representation_anchor(
+            feature_row=feature_row,
+            sample_history=histories[sample_id],
+        )
+        previous = history[-2] if len(history) >= 2 else None
+        anchor_drift = _as_float(anchor, "representation_drift")
+        previous_drift = (
+            _as_float(previous, "representation_drift")
+            if previous is not None
+            else anchor_drift
+        )
+        history_drifts = [_as_float(row, "representation_drift") for row in history]
+        row = dict(feature_row)
+        row.update(
+            {
+                "anchor_representation_drift": anchor_drift,
+                "anchor_cosine_similarity_to_reference": _as_float(
+                    anchor,
+                    "cosine_similarity_to_reference",
+                ),
+                "anchor_representation_l2": _as_float(anchor, "representation_l2"),
+                "previous_representation_drift": previous_drift,
+                "representation_drift_delta_from_previous": (
+                    anchor_drift - previous_drift
+                ),
+                "representation_drift_increase_from_previous": max(
+                    0.0,
+                    anchor_drift - previous_drift,
+                ),
+                "max_representation_drift_so_far": max(history_drifts),
+                "representation_feature_uses_rows_up_to_trained_task_id": _as_int(
+                    feature_row,
+                    "anchor_trained_task_id",
+                ),
+                "representation_feature_uses_rows_up_to_global_step": _as_int(
+                    feature_row,
+                    "anchor_global_step",
+                ),
+            }
+        )
+        augmented_rows.append(row)
+    if not augmented_rows:
+        raise ValueError("no feature rows could be matched with representation signals")
+    return augmented_rows
+
+
 def _artifact_info(path: str | Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -319,6 +447,108 @@ def build_expensive_signal_diagnostic_report(
     }
 
 
+def _proposal_signal_comparison(
+    ablation_report: dict[str, Any],
+) -> list[dict[str, Any]]:
+    rows = []
+    for signal_family in PROPOSAL_SIGNAL_FEATURE_GROUPS:
+        payload = ablation_report["feature_group_reports"].get(signal_family, {})
+        best_model = payload.get("best_model", {})
+        model_name = best_model.get("name")
+        metrics = (
+            payload.get("model_report", {})
+            .get("models", {})
+            .get(model_name, {})
+            .get("metrics", {})
+            if model_name is not None
+            else {}
+        )
+        rows.append(
+            {
+                "signal_family": signal_family,
+                "best_model": model_name,
+                "average_precision": best_model.get("average_precision"),
+                "roc_auc": metrics.get("roc_auc"),
+            }
+        )
+    return rows
+
+
+def build_proposal_signal_diagnostic_report(
+    *,
+    signal_payload: dict[str, Any],
+    label_payload: dict[str, Any],
+    gradient_payload: dict[str, Any],
+    representation_payload: dict[str, Any],
+    signal_path: str | Path | None = None,
+    label_path: str | Path | None = None,
+    gradient_path: str | Path | None = None,
+    representation_path: str | Path | None = None,
+    reference_metrics_payload: dict[str, Any] | None = None,
+    diagnostic_metrics_payload: dict[str, Any] | None = None,
+    reference_metrics_path: str | Path | None = None,
+    diagnostic_metrics_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build a comparison report for the four proposal signal families."""
+
+    base_rows = build_feature_rows(
+        signal_payload=signal_payload,
+        label_payload=label_payload,
+    )
+    gradient_rows = augment_feature_rows_with_gradient_signals(
+        feature_rows=base_rows,
+        gradient_payload=gradient_payload,
+    )
+    augmented_rows = augment_feature_rows_with_representation_signals(
+        feature_rows=gradient_rows,
+        representation_payload=representation_payload,
+    )
+    ablation_report = evaluate_signal_ablations(
+        augmented_rows,
+        feature_groups=PROPOSAL_SIGNAL_FEATURE_GROUPS,
+    )
+    return {
+        "schema_version": EXPENSIVE_SIGNAL_DIAGNOSTIC_SCHEMA_VERSION,
+        "created_at_utc": datetime.now(UTC).isoformat(),
+        "target": PRIMARY_TARGET,
+        "source_signal_artifact": _artifact_info(signal_path),
+        "source_label_artifact": _artifact_info(label_path),
+        "source_gradient_artifact": _artifact_info(gradient_path),
+        "source_representation_artifact": _artifact_info(representation_path),
+        "source_reference_metrics_artifact": _artifact_info(reference_metrics_path),
+        "source_diagnostic_metrics_artifact": _artifact_info(diagnostic_metrics_path),
+        "definition": {
+            "signal_families": list(PROPOSAL_SIGNAL_FEATURE_GROUPS),
+            "target_rule": "forgot_any_future from forgetting_labels.json",
+            "feature_rule": "all features use seen_task_eval rows at or before each anchor only",
+            "purpose": "compare only the proposal-mentioned signal families: loss trajectory, uncertainty, gradient norm, and representation drift",
+        },
+        "feature_summary": {
+            "base_row_count": len(base_rows),
+            "gradient_augmented_row_count": len(gradient_rows),
+            "proposal_augmented_row_count": len(augmented_rows),
+            "loss_trajectory_feature_columns": list(
+                PROPOSAL_SIGNAL_FEATURE_GROUPS["loss_trajectory"]
+            ),
+            "uncertainty_feature_columns": list(
+                PROPOSAL_SIGNAL_FEATURE_GROUPS["uncertainty"]
+            ),
+            "gradient_feature_columns": list(GRADIENT_FEATURE_COLUMNS),
+            "representation_drift_feature_columns": list(
+                REPRESENTATION_DRIFT_FEATURE_COLUMNS
+            ),
+        },
+        "gradient_signal_summary": gradient_payload.get("summary", {}),
+        "representation_signal_summary": representation_payload.get("summary", {}),
+        "runtime_overhead": _runtime_overhead(
+            reference_metrics_payload=reference_metrics_payload,
+            diagnostic_metrics_payload=diagnostic_metrics_payload,
+        ),
+        "ablation_report": ablation_report,
+        "proposal_signal_comparison": _proposal_signal_comparison(ablation_report),
+    }
+
+
 def build_expensive_signal_diagnostic_report_from_paths(
     *,
     signal_path: str | Path,
@@ -359,6 +589,59 @@ def save_expensive_signal_diagnostic_report(
         signal_path=signal_path,
         label_path=label_path,
         gradient_path=gradient_path,
+        reference_metrics_path=reference_metrics_path,
+        diagnostic_metrics_path=diagnostic_metrics_path,
+    )
+    _atomic_write_json(Path(output_path), report)
+    return report
+
+
+def build_proposal_signal_diagnostic_report_from_paths(
+    *,
+    signal_path: str | Path,
+    label_path: str | Path,
+    gradient_path: str | Path,
+    representation_path: str | Path,
+    reference_metrics_path: str | Path | None = None,
+    diagnostic_metrics_path: str | Path | None = None,
+) -> dict[str, Any]:
+    signal_path = Path(signal_path)
+    label_path = Path(label_path)
+    gradient_path = Path(gradient_path)
+    representation_path = Path(representation_path)
+    reference_payload = _read_json(Path(reference_metrics_path)) if reference_metrics_path else None
+    diagnostic_payload = _read_json(Path(diagnostic_metrics_path)) if diagnostic_metrics_path else None
+    return build_proposal_signal_diagnostic_report(
+        signal_payload=_read_json(signal_path),
+        label_payload=_read_json(label_path),
+        gradient_payload=_read_json(gradient_path),
+        representation_payload=_read_json(representation_path),
+        signal_path=signal_path,
+        label_path=label_path,
+        gradient_path=gradient_path,
+        representation_path=representation_path,
+        reference_metrics_payload=reference_payload,
+        diagnostic_metrics_payload=diagnostic_payload,
+        reference_metrics_path=reference_metrics_path,
+        diagnostic_metrics_path=diagnostic_metrics_path,
+    )
+
+
+def save_proposal_signal_diagnostic_report(
+    *,
+    signal_path: str | Path,
+    label_path: str | Path,
+    gradient_path: str | Path,
+    representation_path: str | Path,
+    output_path: str | Path,
+    reference_metrics_path: str | Path | None = None,
+    diagnostic_metrics_path: str | Path | None = None,
+) -> dict[str, Any]:
+    report = build_proposal_signal_diagnostic_report_from_paths(
+        signal_path=signal_path,
+        label_path=label_path,
+        gradient_path=gradient_path,
+        representation_path=representation_path,
         reference_metrics_path=reference_metrics_path,
         diagnostic_metrics_path=diagnostic_metrics_path,
     )

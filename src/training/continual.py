@@ -12,7 +12,7 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from src.metrics.continual import AccuracyMatrix
-from src.signals import GradientSignalLogger, SampleSignalLogger
+from src.signals import GradientSignalLogger, RepresentationDriftLogger, SampleSignalLogger
 
 
 class TaskStreamLike(Protocol):
@@ -124,6 +124,7 @@ def evaluate_task_accuracy(
     device: torch.device | None = None,
     signal_logger: SampleSignalLogger | None = None,
     gradient_signal_logger: GradientSignalLogger | None = None,
+    representation_signal_logger: RepresentationDriftLogger | None = None,
     trained_task_id: int | None = None,
     evaluated_task_id: int | None = None,
     global_step: int = 0,
@@ -173,6 +174,23 @@ def evaluate_task_accuracy(
                         "when logging gradient evaluation signals"
                     )
                 gradient_signal_logger.log_batch(
+                    model=model,
+                    inputs=x,
+                    targets=y,
+                    batch=batch,
+                    observation_type="seen_task_eval",
+                    trained_task_id=trained_task_id,
+                    evaluated_task_id=evaluated_task_id,
+                    global_step=global_step,
+                    is_replay=False,
+                )
+            if representation_signal_logger is not None:
+                if trained_task_id is None or evaluated_task_id is None:
+                    raise ValueError(
+                        "trained_task_id and evaluated_task_id are required "
+                        "when logging representation evaluation signals"
+                    )
+                representation_signal_logger.log_batch(
                     model=model,
                     inputs=x,
                     targets=y,

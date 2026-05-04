@@ -1,5 +1,5 @@
-protocol_id: nlp_speed_pilot_v1
-output_root: experiments/runs/nlp_continual_pilot
+protocol_id: nlp_representation_drift_online_v1
+output_root: experiments/runs/nlp_representation_drift_online
 
 dataset:
   name: fancyzhx/dbpedia_14
@@ -21,11 +21,7 @@ model:
 trainer:
   seed: 0
   methods:
-    - fine_tuning
-    - random_replay
-    - spaced_replay
-    - risk_ranked_replay
-    - mir_replay
+    - representation_drift_replay
   epochs_per_task: 1
   batch_size: 32
   replay_batch_size: 32
@@ -34,11 +30,22 @@ trainer:
   memory_capacity: 2000
   use_amp: true
   num_workers: 0
+  log_representation_drift: true
 
 spaced_replay:
   min_interval_steps: 1
   max_interval_steps: 64
   loss_scale: 5.0
+
+representation_drift_replay:
+  drift_variant: drift_due_time
+  candidate_count: 64
+  scoring_batch_size: 64
+  drift_scale: 1.0
+  min_interval_steps: 1
+  max_interval_steps: 64
+  hybrid_fraction: 0.5
+  hybrid_diversity_mode: class_balanced
 
 mir_replay:
   candidate_count: 64

@@ -1,4 +1,4 @@
-"""Generate compact figures for the Task 25 final synthesis.
+"""Generate compact figures for the final results summary.
 
 The plotted values are the documented summary metrics from the completed
 Split CIFAR-100 study. This script is intentionally data-light: it regenerates
@@ -46,26 +46,29 @@ def plot_core_methods() -> None:
     methods = [
         "Fine-tune",
         "Random",
-        "Fixed k=1",
         "Spaced",
+        "Risk-ranked",
+        "Rep drift",
         "MIR",
     ]
     final_accuracy = [
         0.04703333333333334,
         0.10156666666666665,
-        0.10156666666666665,
         0.09863333333333334,
+        0.07736666666666667,
+        0.09876666666666667,
         0.11636666666666667,
     ]
     avg_forgetting = [
         0.43103703703703705,
         0.30274074074074075,
-        0.30274074074074075,
         0.3131111111111111,
+        0.3596666666666667,
+        0.29633333333333334,
         0.2167037037037037,
     ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
     axes[0].bar(methods, final_accuracy, color="#2f6f73")
     _style_axis(axes[0], "Final Accuracy, Higher Is Better", "Accuracy")
     _annotate_bars(axes[0], final_accuracy)
@@ -77,7 +80,7 @@ def plot_core_methods() -> None:
     axes[1].tick_params(axis="x", rotation=25)
 
     fig.suptitle("Core Three-Seed Split CIFAR-100 Results", fontsize=13)
-    fig.savefig(FIGURE_DIR / "task25_core_methods.png", dpi=180)
+    fig.savefig(FIGURE_DIR / "cifar100_core_methods.png", dpi=180)
     plt.close(fig)
 
 
@@ -125,7 +128,7 @@ def plot_seed0_replay_methods() -> None:
     axes[1].tick_params(axis="x", rotation=35)
 
     fig.suptitle("Learned Replay and Rescue-Ablation Results", fontsize=13)
-    fig.savefig(FIGURE_DIR / "task25_seed0_replay_methods.png", dpi=180)
+    fig.savefig(FIGURE_DIR / "cifar100_seed0_replay_methods.png", dpi=180)
     plt.close(fig)
 
 
@@ -144,7 +147,7 @@ def plot_predictor_diagnostics() -> None:
     _style_axis(ax, "Offline Future-Forgetting Prediction", "Average precision")
     _annotate_bars(ax, average_precision)
     ax.tick_params(axis="x", rotation=20)
-    fig.savefig(FIGURE_DIR / "task25_predictor_diagnostics.png", dpi=180)
+    fig.savefig(FIGURE_DIR / "cifar100_predictor_diagnostics.png", dpi=180)
     plt.close(fig)
 
 
@@ -168,7 +171,7 @@ def plot_mir_diagnostic() -> None:
     _style_axis(ax, "Learned Risk Does Not Align With MIR", "Score")
     _annotate_bars(ax, values)
     ax.tick_params(axis="x", rotation=20)
-    fig.savefig(FIGURE_DIR / "task25_mir_interference_diagnostic.png", dpi=180)
+    fig.savefig(FIGURE_DIR / "cifar100_mir_interference_diagnostic.png", dpi=180)
     plt.close(fig)
 
 
@@ -178,7 +181,7 @@ def main() -> None:
     plot_seed0_replay_methods()
     plot_predictor_diagnostics()
     plot_mir_diagnostic()
-    print(f"Wrote Task 25 figures to {FIGURE_DIR}")
+    print(f"Wrote result figures to {FIGURE_DIR}")
 
 
 if __name__ == "__main__":
